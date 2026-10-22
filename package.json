@@ -1,0 +1,21 @@
+{
+  "name": "ben",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --timeout 30000 tests",
+    "test:core": "node scripts/test.mjs core",
+    "test:browser": "node scripts/test.mjs browser",
+    "test:sandbox": "node scripts/test.mjs sandbox",
+    "ben": "bun src/cli.ts"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
+}

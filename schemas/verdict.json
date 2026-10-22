@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reviewer verdict",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "blockers", "notes"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["GO", "NO_GO"] },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "claim", "evidence", "falsifier", "criterionRef", "respondsTo"],
+        "properties": {
+          "id": { "type": "string", "description": "reviewer-local id, e.g. B1" },
+          "severity": { "type": "string", "enum": ["BLOCKER", "MAJOR", "NIT"] },
+          "claim": { "type": "string" },
+          "evidence": { "type": "string", "description": "file:line or a concrete failure scenario; empty string is mechanically dropped" },
+          "falsifier": { "type": "string", "description": "what would prove this blocker wrong; empty string is mechanically dropped" },
+          "criterionRef": { "type": "string", "description": "criterion id this attacks, or empty string" },
+          "respondsTo": { "type": "string", "description": "fingerprint of a rejected ledger entry being contested, or empty string" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

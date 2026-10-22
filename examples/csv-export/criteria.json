@@ -1,0 +1,35 @@
+{
+  "taskId": "csv-example",
+  "criteria": [
+    {
+      "id": "C1",
+      "statement": "exportCsv filters by exact status and/or region match combined with AND; omitted filters include all records; output rows retain input order.",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    },
+    {
+      "id": "C2",
+      "statement": "Output header is exactly id,name,status,region and each row contains only those four fields in that order; internalNotes and any extra record fields never appear in the output.",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    },
+    {
+      "id": "C3",
+      "statement": "Cells are comma-delimited; cells containing a comma, double quote, CR, or LF are wrapped in double quotes with embedded quotes doubled; every record (including the header and the last row) ends with CRLF.",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    },
+    {
+      "id": "C4",
+      "statement": "When no records match (or the input is empty), exportCsv returns exactly \"id,name,status,region\\r\\n\".",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    },
+    {
+      "id": "C5",
+      "statement": "exportCsv does not mutate the input records array, any record object, or the filters object.",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    },
+    {
+      "id": "C6",
+      "statement": "README.md includes an exportCsv usage example and states that spreadsheet formula injection is not neutralized, so the output is not safe to open as an untrusted spreadsheet.",
+      "verification": { "method": "test", "command": "node --test export-csv.test.mjs" }
+    }
+  ]
+}

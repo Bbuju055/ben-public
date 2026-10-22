@@ -1,0 +1,14 @@
+# Dependencies and generated artifacts
+.DS_Store
+node_modules/
+.playwright-browsers/
+test-results/
+dist/
+*.log
+.env
+.env.*
+
+# Local settings, working records and task state
+.claude/
+.local/
+.ben/

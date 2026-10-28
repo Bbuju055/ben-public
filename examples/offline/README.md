@@ -30,6 +30,5 @@ The script asserts these outcomes and exits nonzero if any stop being true.
 Inspect `transcript.txt` for raw command output and `repo/.ben/` for the approval,
 decision records, failed and passing evidence, criteria matrix, and PR body.
 It stops before publication and does not claim a delivered PR or satisfy the
-runner's outstanding [live blocker reconciliation and review-continuation
-checks](../../ROADMAP.md#live-verification-open). It illustrates why a scripted GO
+[live runner acceptance criteria](../../VERIFICATION.md#live-acceptance-and-release-decision). It illustrates why a scripted GO
 alone is insufficient: the deliberately wrong code still has to pass real checks.

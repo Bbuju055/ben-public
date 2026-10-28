@@ -3,10 +3,9 @@
 - **Verification adequacy:** an e2e criterion's presence does not establish that
   it covers the changed behavior. Reviewers must judge adequacy; passing commands
   and model agreement can still miss defects.
-- **Live reliability:** live blocker reconciliation, review continuation beyond
-  the soft cap and full integrated live runner acceptance remain open, as defined
-  in the [roadmap](ROADMAP.md#live-verification-open). Scripted actors do not establish
-  live model compliance.
+- **Live reliability:** bounded acceptance does not establish general autonomous
+  reliability. Beyond-soft-cap continuation remains unexercised and accepted as
+  a release gap; service/reboot recovery is unverified. See [verification](VERIFICATION.md#live-acceptance-and-release-decision).
 - **Hosted evidence:** target PRs do not automatically receive hosted CI proof.
   Checks of ben itself do not establish the correctness of a target change.
 - **Spending:** accounting includes estimates and conservative reservations;

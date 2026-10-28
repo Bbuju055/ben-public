@@ -14,21 +14,15 @@ reliability. See [verification](VERIFICATION.md) for local check results.
 - Bounded transient retries, fresh-context recovery, concurrent task supervision
   and local unattended-readiness reporting.
 
-## Live verification open
+## Live verification
 
-- **Live blocker reconciliation (A):** real Codex NO_GO → ben's disposition →
-  automatic reconciliation or a human veto gate.
-- **Review continuation beyond the soft cap (C):** a qualifying live review with
-  blockers continues under the convergence policy.
-- **Full live runner acceptance:** an integrated assignment through publication
-  and recovery drills. Partial historical runs and scripted tests do not establish
-  a complete qualifying run.
+- Blocker reconciliation (A): passed in two separate synthetic assignments.
+- Integrated runner acceptance (E1–E6): passed in one assignment, with human
+  amendments and manual recovery.
+- Beyond-soft-cap continuation (C/CF-C1): unexercised; release owner accepted
+  the gap on 2026-10-28. Campaign closed; no further live attempts.
 
-A failed-check repair (B) and some publication/recovery paths were observed in
-historical live runs. Those observations do not close live blocker reconciliation,
-review continuation beyond the soft cap or full live runner acceptance.
-The [CSV example](examples/csv-export/PROVENANCE.md) is a separate,
-bounded interactive happy-path example.
+See [verification](VERIFICATION.md#live-acceptance-and-release-decision) for scope and limitations.
 
 ## Future work
 

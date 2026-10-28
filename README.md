@@ -81,9 +81,10 @@ for current workflows.
 
 ## Limits
 
-Experimental, single-operator tooling. The runner is built and locally tested;
-[full live acceptance remains open](ROADMAP.md#live-verification-open). Scripted tests do not establish live model reliability. Checks and review can miss defects; cost estimates are
-not a spending ceiling.
+Experimental, single-operator macOS tooling. Bounded live acceptance passed with
+human intervention; beyond-soft-cap continuation remains unexercised and is an
+accepted release gap. See [verification](VERIFICATION.md#live-acceptance-and-release-decision).
+Checks can miss defects; cost estimates are not spending ceilings.
 
 Local check results and their scope are recorded in [verification](VERIFICATION.md).
 

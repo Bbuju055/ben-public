@@ -16,8 +16,7 @@ The original suite had 17 distinct passing tests, reused by six criteria (not
 102 tests). A historical local reproduction also passed 17/17; it did not rerun either
 model, approval or the runner. Current local check results are listed in
 [verification](../../VERIFICATION.md). There were no actual review
-findings or failing build checks in this case. [Live blocker reconciliation and
-review continuation beyond the soft cap remain open](../../ROADMAP.md#live-verification-open).
+findings or failing build checks in this case. See the [current live acceptance status](../../ROADMAP.md#live-verification).
 
 The deliberate boundary: fixed columns exclude internal notes; CSV escaping
 preserves values. Spreadsheet formula injection is not neutralized. Invalid input,

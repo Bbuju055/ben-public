@@ -1,64 +1,58 @@
-# Local verification
+# Verification
 
-## Full offline results
+## Offline and hosted checks
 
-The full offline suite passed on 2026-10-22: **483 tests, 0 failures and
-4,207 assertions across 21 files**. The run took about 13.4 minutes. TypeScript checking, the
-separate CSV tests and the offline walkthrough also passed.
+The 2026-10-22 local suite passed: **483 tests, 0 failures, 4,207 assertions**
+across 21 files. Typechecking, 17 separate CSV tests and the offline walkthrough
+also passed. Environment: macOS 26.1 arm64, Node.js 24.10.0, Bun 1.3.14;
+existing dependencies and Chromium were reused.
 
-| Command | Result |
+Published runtime `e60614ba888e1ce3d0651ddef540d6fe72ee02e1` passed
+[hosted Checks](https://github.com/Bbuju055/ben-public/actions/runs/39864942671):
+core/typecheck/offline/CSV, browser, and macOS isolation. Success was rechecked
+on 2026-10-28. Later commits require their own CI result.
+
+Tests use scripted actors and disposable repositories, not live models or
+external repository writes. The network-isolation canary contacts `example.com`.
+Scripted coverage does not establish live model reliability.
+
+## Running checks
+
+| Command | Scope |
 | --- | --- |
-| `bun run typecheck` | Passed |
-| `bun run test` | 483 passed, 0 failed; 4,207 assertions across 21 files |
-| `node --test examples/csv-export/export-csv.test.mjs` | 17 passed, 0 failed |
-| `node examples/offline/run.mjs` | Passed; deliberate failures, a simulated grant and successful repair |
+| `bun run typecheck` | TypeScript |
+| `bun run test` | Full suite |
+| `node --test examples/csv-export/export-csv.test.mjs` | CSV example |
+| `node examples/offline/run.mjs` | Scripted workflow walkthrough |
 
-Checks ran on macOS 26.1 (arm64), Node.js 24.10.0 and Bun 1.3.14, from isolated
-source copies with separate home, task, temporary and Git configuration state.
-Existing local dependencies and Chromium were reused; this was not a fresh
-lockfile installation. Model and GitHub actors were scripted. Git initialization,
-commits and local pushes occurred only in disposable test fixtures. No live
-model calls or external repository writes occurred.
-
-The full suite ran outside the execution sandbox to allow local listeners and
-nested macOS sandbox profiles. The typecheck, CSV tests and walkthrough passed
-inside the execution sandbox on the same source bytes. “Offline” here excludes live models and external
-repository writes; the network-isolation test retains its `example.com` canary.
-
-The full run includes 15 regression tests, browser and macOS sandbox
-checks, approval and Stop-hook enforcement, and runner recovery. Regression
-coverage includes failed reviewer output and restart replay, broken runtime
-pins and explicit repinning, stale manual checks and fresh human answers.
-
-Recovery coverage includes lost sessions, bounded provider retries,
-fresh-context recovery, concurrent service tasks, persisted backoff, offline
-publication deferral and task limits. Guidance checks cover sequencer-selected
-references, delivery to headless work, missing or invalid references, runtime
-pinning and preservation of existing pins.
-
-Executable code, tests and configuration match the tested source. The current
-workflow guidance has not been validated in a live model session.
-
-## Test requirements
-
-The full suite requires macOS with `/usr/bin/sandbox-exec` and permission to
-launch local processes, open listeners and run nested sandbox profiles. Browser
-tests expect Chromium in `.playwright-browsers/`; install it with
+The full suite requires macOS, `/usr/bin/sandbox-exec`, local listeners and
+nested sandbox profiles. Browser tests require Chromium:
 `PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" ./node_modules/.bin/playwright install chromium`.
-The sandbox network canary contacts `example.com`.
+CI partitions the suite into `test:core`, `test:browser` and `test:sandbox`.
 
-Tests use temporary repositories and task state, with no paid model calls or
-GitHub writes. Recovery tests can deliberately pause for a minute. CI partitions
-the suite into `test:core`, `test:browser` and `test:sandbox`.
+## Live acceptance and release decision
 
-## Evidence limits
+These results apply to runtime commit `e60614ba888e1ce3d0651ddef540d6fe72ee02e1`.
+The acceptance update changes documentation only.
 
-The tests use scripted model actors and local Git/PR fixtures. They exercise
-approval binding, stale-answer refusal, recovery, publication consistency and
-isolation; they do not establish live model compliance or hosted CI success.
+| Claim | Result |
+| --- | --- |
+| A: live blocker reconciliation | PASS in two separate synthetic assignments. |
+| E1–E6: integrated runner acceptance | PASS in the first assignment, with qualifications below. |
+| C/CF-C1: natural/controlled beyond-soft-cap continuation | NOT EXERCISED; release owner accepted the gap on 2026-10-28. |
 
-[Live blocker reconciliation, review continuation beyond the soft cap and full
-live runner acceptance remain open](ROADMAP.md#live-verification-open).
-The [CSV provenance](examples/csv-export/PROVENANCE.md) describes a separate
-historical interactive example. These checks neither replay its model calls
-nor close the live acceptance gaps.
+The first assignment exercised real CLIs/isolation, human approval,
+implementation/review, manual interruption/recovery and one intended private PR;
+56 local tests passed. It required one plan-round grant, two extra stretches
+and a publication-retry approval. Recovery used an intentional timing seam and
+manual resume, not service/reboot recovery. A separate assignment repaired two
+blockers and passed 16 tests; its next review returned GO.
+
+C requires qualifying blocker-bearing continuation beyond the soft cap without
+a grant. Successful repairs followed by GO did not exercise it. The final CF-C1
+attempt timed out at an external admission gate before its probe ran; no fault
+was injected. The campaign is closed; no further live attempts are planned.
+
+Raw evidence and failures remain privately retained. The assignments are
+separate evidence, not one all-paths run. Neither target had hosted checks
+observed. These bounded results do not establish general autonomous reliability.

@@ -15,7 +15,7 @@
 //                       [--plan-rounds N] [--diff-rounds N] [--plan-rounds-max N] [--diff-rounds-max N] [--e2e-paths a,b]
 //   runner.mjs resume   --repo <path> [--gate <id>] [--choose <token>] [--reply <text>|--reply-file <f>] [--note <t>]
 //                       [--usd N|--hours N|--stretches N] [--criterion <id>] [--residual <t>] [--inline]
-//   runner.mjs status   --repo <path> [--detail] [--json]
+//   runner.mjs status   --repo <path> [--detail] [--json] [--refresh-ci]
 //   runner.mjs readiness --repo <path>                 (read-only local readiness)
 //   assign/resume/follow-up accept --keep-awake or --allow-sleep (explicit idle-sleep policy)
 //   runner.mjs follow-up --repo <path> --pr N "<note>" [--reopen|--abandon]
@@ -91,6 +91,7 @@ import {
   sha256,
 } from './runner.lib.mjs';
 import { assignmentIssues, prTitleFor } from './adjudication.lib.mjs';
+import { ciTarget, collectCi, ciForStatus } from './ci.lib.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const RUNNER_HOME = realOrResolved(process.env.BEN_RUNNER_HOME ?? join(homedir(), '.ben-runner'));
@@ -1963,6 +1964,26 @@ function cmdStatus() {
   }
   runtimeDir(repo);
   const task = readT.task;
+  const target = ciTarget(task);
+  const ciPath = join(RDIR(repo), 'ci-observations.jsonl');
+  let ciObservation;
+  try {
+    ciObservation = existsSync(ciPath) ? parseJsonl(readFileSync(ciPath, 'utf8')).at(-1) : undefined;
+  } catch {
+    ciObservation = { invalid: true }; // unreadable diagnostics must not break status
+  }
+  if (values['refresh-ci'] && target) {
+    ciObservation = collectCi(target, path => {
+      const response = gh(['api', '--method', 'GET', path], { timeoutMs: 15_000 });
+      if (response.code !== 0) throw new Error('GitHub CI API unavailable or permission denied.');
+      try { return JSON.parse(response.out); } catch { throw new Error('GitHub CI API returned invalid JSON.'); }
+    });
+    mkdirSync(RDIR(repo), { recursive: true });
+    // Separate a torn previous observation without discarding historical bytes.
+    appendFileSync(ciPath, '\n');
+    appendDurable(ciPath, ciObservation);
+  }
+  const ci = ciForStatus(ciObservation, target, git(repo, ['rev-parse', 'HEAD']).out);
   const status = statusJson(repo);
   const alive = runnerAlive(repo);
   const totals = accountTotals(rows(repo), alive ? { inFlightId: st.currentStretch ?? undefined, live: true } : {});
@@ -1973,10 +1994,13 @@ function cmdStatus() {
   const name = `${basename(repo)}/${pub?.branch?.replace(/^ben\//, '') ?? task?.title ?? 'task'}`;
   const spent = `spent $${totals.usd.toFixed(2)} of $${limits.usd} (${totals.exactUsd.toFixed(2)} exact${totals.cappedUsd > 0 ? ` + ${totals.cappedUsd.toFixed(2)} unreported, charged at cap` : ''}${totals.inFlightCapUsd > 0 ? ` + one stretch in flight, cap $${totals.inFlightCapUsd.toFixed(2)}` : ''} + ${totals.reviewerCalls} reviewer calls estimated $${totals.reviewerUsd.toFixed(2)}) · ${(totals.activeMs / 3600000).toFixed(2)}h of ${limits.hours}h active · stretch ${totals.stretches}/${limits.stretches}`;
   if (values.json) {
-    console.log(JSON.stringify({ state: cls.state, detail: cls.detail, name, totals, limits, runnerAlive: alive, runnerState: st, sequencer: status }, null, 2));
+    console.log(JSON.stringify({ state: cls.state, detail: cls.detail, name, totals, limits, runnerAlive: alive, runnerState: st, sequencer: status, ci }, null, 2));
     return;
   }
   const lines = [`${name} · ${cls.state}${cls.detail ? ` · ${cls.detail}` : ''}`];
+  lines.push(`  CI (informational snapshot): ${ci.state} · reviewed ${ci.reviewedSha ?? 'none'} · observed ${ci.observedAt ?? 'never'}`);
+  lines.push(`  ${ci.reason} Refresh with status --refresh-ci; cached status does not recheck GitHub.`);
+  if (values.detail) for (const check of ci.checks) lines.push(`    ${check.state}: ${check.name} · ${check.url}`);
   if (st.lastActivityAt) lines.push(`  last activity ${Math.round((lastActivityMs ?? 0) / 60000)} min ago · ${spent}`);
   else lines.push(`  ${spent}`);
   if (cls.state === 'WAITING ON YOU' || cls.state === 'LIMIT REACHED' || (cls.state === 'NEEDS YOU' && status?.waiting?.state === 'current')) {
@@ -2349,6 +2373,7 @@ try {
       abandon: { type: 'boolean', default: false },
       detail: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
+      'refresh-ci': { type: 'boolean', default: false },
       inline: { type: 'boolean', default: false },
       once: { type: 'boolean', default: false },
       repin: { type: 'boolean', default: false },

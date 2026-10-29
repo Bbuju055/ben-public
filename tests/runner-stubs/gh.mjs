@@ -16,6 +16,17 @@ const opt = (name) => {
 if (process.env.BEN_STUB_GH_LOG) appendFileSync(process.env.BEN_STUB_GH_LOG, `${argv.join(' ')}\n`);
 const offline = process.env.BEN_STUB_OFFLINE_FILE && existsSync(process.env.BEN_STUB_OFFLINE_FILE);
 const [cmd, sub] = argv;
+if (cmd === 'api' && process.env.BEN_STUB_CI_FIXTURE && argv.includes('GET')) {
+  const path = argv.at(-1);
+  const responses = JSON.parse(readFileSync(process.env.BEN_STUB_CI_FIXTURE, 'utf8'));
+  const response = responses[path];
+  if (response === undefined || response.error) {
+    console.error(response?.error ?? `missing CI fixture: ${path}`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(response));
+  process.exit(0);
+}
 const inspectionFailure = process.env.BEN_STUB_INSPECTION_FAILURE;
 if (cmd === 'pr' && sub === 'list' && inspectionFailure && existsSync(inspectionFailure)) {
   const left = Number(readFileSync(inspectionFailure, 'utf8'));

@@ -1031,7 +1031,14 @@ function acquireRunnerLock(repo) {
       return true;
     } catch (err) {
       if (err?.code !== 'EEXIST') throw err;
-      const pid = Number(readFileSync(RLOCK(repo), 'utf8').trim());
+      const owner = readFileSync(RLOCK(repo), 'utf8').trim();
+      const pid = Number(owner);
+      // The creator may still be between open('wx') and writing its PID.
+      // Missing/malformed identity is not proof that an owner is dead.
+      if (!/^[1-9][0-9]*$/.test(owner) || !Number.isSafeInteger(pid) || pid > 0x7fffffff) {
+        rlog(repo, 'runner.lock has ambiguous ownership; preserved for inspection');
+        return false;
+      }
       if (pidAlive(pid)) return false;
       rlog(repo, `stale runner.lock (pid ${pid} dead) replaced`);
       unlinkSync(RLOCK(repo));
@@ -1165,7 +1172,7 @@ async function runLoop(repo, { once = false } = {}) {
   repo = realOrResolved(repo);
   if (!existsSync(join(S(repo), 'task.json'))) fail(`no task in ${repo} — runner.mjs assign first`);
   if (!acquireRunnerLock(repo)) {
-    console.log(`ben: another runner is alive for ${repo} (${RLOCK(repo)})`);
+    console.log(`ben: runner ownership is held or ambiguous for ${repo} (${RLOCK(repo)})`);
     process.exit(2);
   }
   // ownership taken: bind the executing runtime to the authoritative pin before

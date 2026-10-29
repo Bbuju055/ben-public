@@ -862,6 +862,27 @@ test('diff audit: a PR merged or closed AFTER the follow-up started is never pus
 // ---------------------------------------------------------------------------
 // corrections — recovery paths, ownership, binding
 
+test('recovery: an empty or malformed runner lock is ambiguous ownership, never a dead owner to replace', async () => {
+  const w = await world();
+  await toApprovedIntent(w);
+  const taskBefore = await readFile(join(S(w.repo), 'task.json'), 'utf8');
+  const driversBefore = await driverRows(w);
+  const lock = join(S(w.repo), 'runner.lock');
+  for (const contents of ['', 'not-a-pid', '0', '-1', '1e3', '9007199254740993', '2147483648']) {
+    await writeFile(lock, contents); // interrupted/malformed ownership record
+    try {
+      const result = await ben(w, ['run', '--repo', w.repo, '--once']);
+      expect(result.exitCode).toBe(2);
+      expect(await readFile(lock, 'utf8')).toBe(contents);
+      expect(await readFile(join(S(w.repo), 'task.json'), 'utf8')).toBe(taskBefore);
+      expect(await driverRows(w)).toEqual(driversBefore);
+      expect(existsSync(w.store)).toBe(false);
+    } finally {
+      rmSync(lock, { force: true });
+    }
+  }
+}, 240_000);
+
 test('a dead .run-lock is a contention outcome the runner recovers from on its own', async () => {
   const w = await world();
   const a = await ben(w, ['assign', '--repo', w.repo, '--inline', 'Add a subtract function with a test']);
@@ -875,6 +896,48 @@ test('a dead .run-lock is a contention outcome the runner recovers from on its o
   rmSync(join(S(w.repo), '.run-lock'), { force: true });
   const r2 = await ben(w, ['resume', '--repo', w.repo, '--gate', gate, '--choose', 'approve', '--inline']);
   expect(r2.stdout).toContain('READY FOR REVIEW');
+}, 240_000);
+
+test('recovery: a second start cannot take a live runner lock or duplicate its driver, approval or PR', async () => {
+  const w = await world();
+  const entered = join(w.home, 'implementation-entered');
+  const release = join(w.home, 'release-implementation');
+  await writeFile(w.handler, DEFAULT_HANDLER.replace('export async function handle', 'async function baseHandle') + `
+export async function handle(instruction, ctx) {
+  if (/Implement the plan and commit/.test(instruction)) {
+    writeFileSync(${JSON.stringify(entered)}, 'entered');
+    const deadline = Date.now() + ${PAUSE_BOUNDARY_WAIT_MS + 10000};
+    while (!existsSync(${JSON.stringify(release)})) {
+      if (Date.now() > deadline) throw new Error('fixture release timed out');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
+  return baseHandle(instruction, ctx);
+}`);
+  await toApprovedIntent(w);
+  const limitsBefore = (await readTask(w.repo)).assignment.limits;
+  const first = ben(w, ['run', '--repo', w.repo]);
+  try {
+    const deadline = Date.now() + PAUSE_BOUNDARY_WAIT_MS;
+    while (!existsSync(entered) && Date.now() < deadline) await Bun.sleep(25);
+    expect(existsSync(entered)).toBe(true);
+    const lock = await readFile(join(S(w.repo), 'runner.lock'), 'utf8');
+    const drivers = await driverRows(w);
+    const second = await ben(w, ['run', '--repo', w.repo, '--once']);
+    expect(second.exitCode).toBe(2);
+    expect(await readFile(join(S(w.repo), 'runner.lock'), 'utf8')).toBe(lock);
+    expect(await driverRows(w)).toEqual(drivers);
+  } finally {
+    await writeFile(release, 'release');
+    await first;
+  }
+  expect((await first).stdout).toContain('READY FOR REVIEW');
+  expect(JSON.parse(await readFile(w.store, 'utf8')).prs).toHaveLength(1);
+  expect((await driverRows(w)).filter(row => /Implement the plan and commit/.test(row.instruction))).toHaveLength(1);
+  expect((await readTask(w.repo)).assignment.limits).toEqual(limitsBefore);
+  const status = JSON.parse((await ben(w, ['status', '--repo', w.repo, '--json'])).stdout);
+  expect(status.sequencer.actors.filter((actor: { kind: string }) => actor.kind === 'approval')).toHaveLength(1);
+  expect(existsSync(join(S(w.repo), 'runner.lock'))).toBe(false);
 }, 240_000);
 
 test('killing only the runner leaves a driver behind: the replacement runner terminates that process group before starting anything', async () => {
@@ -1766,8 +1829,17 @@ export async function handle(instruction, ctx) {
   expect(state.retries['driver-transient'].count).toBe(1);
   expect(state.sessionStarted).toBe(false);
   const before = (await driverRows(w)).length;
+  const taskBefore = await readFile(join(S(w.repo), 'task.json'), 'utf8');
   await writeFile(join(w.home, 'registry.json'), JSON.stringify({ repos: [w.repo] }));
-  await ben(w, ['serve'], { BEN_RUNNER_SERVE_ONCE: '1' });
+  // Separate service lifetimes must respect exactly the saved deadline and
+  // retry count, including two service starts observing the same pending retry.
+  const starts = await Promise.all([
+    ben(w, ['serve'], { BEN_RUNNER_SERVE_ONCE: '1' }),
+    ben(w, ['serve'], { BEN_RUNNER_SERVE_ONCE: '1' }),
+  ]);
+  expect(starts.every(result => result.exitCode === 0)).toBe(true);
+  expect(JSON.parse(await readFile(path, 'utf8')).retries).toEqual(state.retries);
+  expect(await readFile(join(S(w.repo), 'task.json'), 'utf8')).toBe(taskBefore);
   expect((await driverRows(w)).length).toBe(before);
   await writeFile(w.handler, DEFAULT_HANDLER);
   state.retries['driver-transient'].nextAt = Date.now() - 1;

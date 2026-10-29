@@ -967,6 +967,88 @@ test('reinspect performs a real inspection: a resolved branch conflict routes to
 
 
 // ---------------------------------------------------------------------------
+// Offline convergence through the runner, with no authoritative-state edits.
+
+const CONVERGENCE_HANDLER = DEFAULT_HANDLER.replace('export async function handle', 'async function baseHandle') + `
+export async function handle(instruction, ctx) {
+  const S = join(ctx.cwd, '.ben');
+  if (/proposal\\.json/.test(instruction) && !existsSync(join(S, 'proposal.json'))) {
+    const blockers = JSON.parse(readFileSync(join(S, 'blockers.json'), 'utf8'));
+    writeFileSync(join(S, 'proposal.json'), JSON.stringify(blockers.map(b => ({ fingerprint: b.fingerprint, action: 'resolved', detail: 'Add the requested boundary example' }))));
+    return { cost: 0.01 };
+  }
+  if (/resolutions\\.json/.test(instruction)) {
+    const file = REVIEW_KIND === 'plan' ? join(S, 'plan.md') : join(ctx.cwd, 'math.ts');
+    writeFileSync(file, readFileSync(file, 'utf8') + '\\n// Boundary example: add(0, 0) === 0\\n');
+    if (REVIEW_KIND === 'diff') execSync('git add math.ts && git commit -q -m "test: boundary example"', { cwd: ctx.cwd });
+    writeFileSync(join(S, 'resolutions.json'), readFileSync(join(S, 'proposal.json')));
+    return { cost: 0.01 };
+  }
+  return baseHandle(instruction, ctx);
+}
+`;
+
+for (const kind of ['plan', 'diff'] as const) {
+  for (const stop of ['hard cap', 'churn'] as const) {
+    test(`runner convergence: ${kind} reconciles beyond soft cap without a grant, then parks on ${stop}`, async () => {
+      const w = await world({ handler: `const REVIEW_KIND = ${JSON.stringify(kind)};\n${CONVERGENCE_HANDLER}` });
+      const blocker = (id: string) => ({ id, severity: 'BLOCKER', claim: `boundary example ${id} missing`, evidence: 'math.ts add()', falsifier: `add boundary example ${id}` });
+      const noGo = (...ids: string[]) => ({ verdict: 'NO_GO', blockers: ids.map(blocker) });
+      // Round 2 is blocker-bearing and strictly decreasing. Round 3 either
+      // hits the hard cap or churns at equal count inside a larger hard cap.
+      const responses = [...(kind === 'diff' ? [GO] : []), noGo('B1', 'B2'), noGo('B1'), noGo(stop === 'churn' ? 'B3' : 'B1')];
+      const calls = join(w.home, 'review-calls.json');
+      const script = join(w.home, 'sequence.mjs');
+      await writeFile(script, `import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+const calls = ${JSON.stringify(calls)};
+const n = existsSync(calls) ? JSON.parse(readFileSync(calls, 'utf8')) : 0;
+const responses = ${JSON.stringify(responses)};
+if (n >= responses.length) throw new Error('unexpected extra review');
+const a = process.argv.slice(2);
+writeFileSync(a[a.indexOf('-o') + 1], JSON.stringify(responses[n]));
+writeFileSync(calls, JSON.stringify(n + 1));
+`);
+      const cli = join(w.home, 'sequence-cli');
+      await writeFile(cli, `#!/bin/sh\nexec node "${script}" "$@"\n`);
+      chmodSync(cli, 0o755);
+      w.env.BEN_REVIEWER_CLI_REAL = cli;
+      let result = await ben(w, ['assign', '--repo', w.repo, '--inline', `--${kind}-rounds`, '1', `--${kind}-rounds-max`, stop === 'hard cap' ? '2' : '4', 'Add subtract']);
+      if (kind === 'diff') {
+        expect(result.stdout).toContain('WAITING ON YOU (approval)');
+        result = await ben(w, ['resume', '--repo', w.repo, '--inline', '--gate', (await readTask(w.repo)).gate.id, '--choose', 'approve']);
+      }
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('WAITING ON YOU (review-stop)');
+      const rounds = JSON.parse(await readFile(join(S(w.repo), 'rounds.json'), 'utf8'));
+      expect(rounds[kind]).toBe(3);
+      expect(rounds.survivors[`${kind}-1`]).toBe(2);
+      expect(rounds.survivors[`${kind}-2`]).toBe(1);
+      expect(rounds.gates[kind].reason).toContain(stop === 'hard cap' ? 'hard round cap (2/2 consumed)' : 'new defect fingerprints');
+      expect(rounds.grants ?? []).toEqual([]);
+      const ledgerPath = join(S(w.repo), 'ledger.jsonl');
+      const ledgerBytes = await readFile(ledgerPath, 'utf8');
+      const rows = ledgerBytes.trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.filter(row => row.action === 'granted')).toEqual([]);
+      for (const [round, count] of [[1, 2], [2, 1], [3, 1]]) {
+        expect(rows.filter(row => row.kind === kind && row.round === round && row.action === 'raised')).toHaveLength(count!);
+        expect(rows.filter(row => row.kind === kind && row.round === round && row.action === 'resolved')).toHaveLength(round === 3 ? 0 : count!);
+      }
+      const drivers = await driverRows(w);
+      expect(drivers.filter(row => row.instruction.includes(`Blockers survive ${kind} round 2.`))).toHaveLength(1);
+      expect(drivers.some(row => row.instruction.includes(`Blockers survive ${kind} round 3.`))).toBe(false);
+      expect(JSON.parse(await readFile(calls, 'utf8'))).toBe(responses.length);
+      expect(existsSync(w.store)).toBe(false);
+      // A plain noninteractive resume cannot answer the human gate.
+      const resume = await ben(w, ['resume', '--repo', w.repo, '--inline']);
+      expect(resume.exitCode).toBe(1);
+      expect(resume.stderr).toContain('a noninteractive answer needs --gate');
+      expect(await readFile(ledgerPath, 'utf8')).toBe(ledgerBytes);
+      expect(await driverRows(w)).toHaveLength(drivers.length);
+      expect(JSON.parse(await readFile(calls, 'utf8'))).toBe(responses.length);
+    }, 300_000);
+  }
+}
+
 // the half-applied grant (crash inside ledger.mjs grant between its two writes)
 
 const RECONCILING_HANDLER = `

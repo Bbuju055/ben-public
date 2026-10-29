@@ -13,6 +13,17 @@ reliability. See [verification](VERIFICATION.md) for local check results.
 - A macOS runner with isolated work stretches, publication and recovery paths.
 - Bounded transient retries, fresh-context recovery, concurrent task supervision
   and local unattended-readiness reporting.
+- Informational target-PR CI status tied to the exact reviewed SHA, refreshed
+  explicitly with `status --refresh-ci`; no required-CI gate or automatic merge.
+- Offline convergence and recovery coverage, plus a disposable service-adapter
+  harness with scripted actors and hosted CI (PRs #2–#5).
+
+## Deferred verification
+
+Installed-service startup, restart and unload cleanup, sleep/wake, logout/login,
+and reboot/login remain **unverified and deferred** until an isolated account or
+machine is available. Offline recovery checks passed; no service was installed
+and no OS transition tests ran. See [verification](VERIFICATION.md#follow-up-verification-2026-10-29).
 
 ## Live verification
 
@@ -30,7 +41,7 @@ See [verification](VERIFICATION.md#live-acceptance-and-release-decision) for sco
 - Richer intake and roadmap assignment.
 - Full spend ledger and referee recovery tooling.
 - Remote answer, status, abort and note controls.
-- Automatic PR follow-through and hosted per-task evidence.
+- Automatic PR follow-through and target-CI evidence collection.
 - Additional reviewers and multi-reviewer policies.
 - Execution environments beyond macOS.
 

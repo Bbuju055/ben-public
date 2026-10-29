@@ -1,0 +1,5 @@
+{
+  "pr": {"html_url":"https://github.com/o/r/pull/7","head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+  "checks": {"total_count":1,"check_runs":[{"id":100,"name":"unit","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"completed","conclusion":"success","app":{"id":1},"check_suite":{"id":10},"html_url":"https://github.com/o/r/actions/runs/100"}]},
+  "statuses": {"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","total_count":1,"state":"success","statuses":[{"id":200,"context":"external-ci","state":"success","target_url":"https://ci.example.com/build/200","url":"https://api.github.com/repos/o/r/statuses/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+}

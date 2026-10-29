@@ -31,12 +31,27 @@ project dependencies. The runner's default base branch is `main`.
 
 ```
 ben assign  --repo <path> "<outcome>"            # branch ben/<slug> from origin/<base>, .ben ignored, init, brief, probe, run
-ben status  --repo <path> [--detail|--json]       # WORKING · WAITING ON YOU · READY FOR REVIEW · STALLED · NEEDS YOU · LIMIT REACHED · PAUSED · NOT RUNNING
+ben status  --repo <path> [--detail|--json] [--refresh-ci]
 ben resume  --repo <path> --gate <id> --choose <token> [--reply "<text>" | --reply-file f] [--note] [--usd N|--hours N|--stretches N] [--criterion C] [--residual "<gap>"]
 ben follow-up --repo <path> --pr N "<note>"        # new task on the same branch; previous task kept under .ben/history/<n>-<slug>/; the SAME PR is updated
 ben service install|uninstall|status              # LaunchAgent (logged-in sessions only): re-resumes a non-parked task after a runner crash, and after login following logout/reboot
 ben repair  --repo <path>                          # names the playbook step for an engineering session (recovery cases)
 ```
+
+`status --refresh-ci` reads GitHub check runs and latest commit statuses for the
+recorded PR's reviewed SHA, checking the PR head before and after collection.
+It appends a dated observation to `.ben/runner/ci-observations.jsonl`; ordinary
+status reads that cache offline (`--detail` includes check links, `--json` the
+full observation). A changed reviewed/local/observed PR head invalidates the
+snapshot. A cached result cannot detect later remote changes; refresh to check.
+
+CI is informational: `passed` means all observed checks and status contexts
+succeeded, not that required checks or branch protection are satisfied. The
+versioned policy keeps the newest run ID per app/suite/name and keeps distinct
+suites separate. States are pending/passed/failed/cancelled/unknown; skipped,
+neutral, missing, unreadable or incomplete evidence is unknown. Reads stop at
+20 pages per API; failures never reuse an older green observation. This does
+not change delivery gates, PR bodies or merge behavior.
 
 Follow-up reads at most 50 pages of 50 review threads and the first 50 comments
 per thread. The runner updates the existing PR; the [interactive publication instructions](publication.md) describe a different publication path.

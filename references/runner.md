@@ -166,3 +166,43 @@ Everything else works without it.
 
 Return to the controller: complete only the current action, then return to the
 sequencer (interactive) or runner (headless). A link does not authorize a next phase.
+
+## Optional notifications
+
+Notifications are off by default. Configure an operator-owned sink in
+`~/.ben-runner/notifications.json` (or the test runner home), never in a target
+repository:
+
+```json
+{"enabled":true,"argv":["/absolute/path/to/notification-sink"]}
+```
+
+The sink receives one JSON event on stdin and acknowledges with exit zero.
+Events are `park`, `stop`, `limit`, or `complete` (ready for review, not merged).
+Payloads contain a stable `id`, repository path, assignment identity and reason;
+completion includes the PR URL and reviewed SHA. Prompts, titles, gate packets
+and provider output are omitted. The sink runs without a shell or inherited
+credentials and has a two-second deadline; remaining sink process-group members
+are killed. Sinks must not daemonize.
+Channel-specific credentials/configuration belong to the operator's sink.
+
+Runner exits observe durable state. `serve` also observes parked/completed tasks
+and retries notifications without restarting their actors. Without a service,
+`runner.mjs notify --repo /path/to/repo` explicitly observes/retries; `status`
+and `readiness` remain read-only. Existing task/service pins are not upgraded
+automatically. Enabling notifications observes the current state, not all
+historical transitions. Model-owned work and transient backoff
+are silent. Changed/answered gates supersede pending alerts. If the same gate
+becomes current again, its retry count and deadline are preserved.
+
+Delivery receipts and pending attempts live under the runner home's
+`notifications/`, outside task authority. Attempts reserve their deadline before
+sending: five attempts maximum, with one-, two-, four- and eight-minute retry
+waits. Restarts preserve deadlines; exhausted/corrupt outboxes require operator
+inspection and never change task budgets, approvals or publication. Ambiguous
+lock ownership (including an interrupted reclamation guard) fails closed.
+A crash after delivery but before acknowledgement can replay the same event ID;
+sinks must deduplicate IDs. Exactly-once delivery is not promised.
+
+Coverage uses local fake sinks and disposable targets only. Live channel
+providers, installed-service notification delivery and OS recovery are unverified.

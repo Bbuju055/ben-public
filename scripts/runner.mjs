@@ -16,6 +16,7 @@
 //   runner.mjs resume   --repo <path> [--gate <id>] [--choose <token>] [--reply <text>|--reply-file <f>] [--note <t>]
 //                       [--usd N|--hours N|--stretches N] [--criterion <id>] [--residual <t>] [--inline]
 //   runner.mjs status   --repo <path> [--detail] [--json] [--refresh-ci]
+//   runner.mjs notify   --repo <path>                  (observe/retry optional notifications)
 //   runner.mjs readiness --repo <path>                 (read-only local readiness)
 //   assign/resume/follow-up accept --keep-awake or --allow-sleep (explicit idle-sleep policy)
 //   runner.mjs follow-up --repo <path> --pr N "<note>" [--reopen|--abandon]
@@ -92,6 +93,7 @@ import {
 } from './runner.lib.mjs';
 import { assignmentIssues, prTitleFor } from './adjudication.lib.mjs';
 import { ciTarget, collectCi, ciForStatus } from './ci.lib.mjs';
+import { reconcileNotifications } from './notifications.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const RUNNER_HOME = realOrResolved(process.env.BEN_RUNNER_HOME ?? join(homedir(), '.ben-runner'));
@@ -224,17 +226,21 @@ function writePin(repo, dir, by) {
 }
 /** Absence permits legacy first-sight pinning; a broken existing binding never does. */
 function readRuntimePin(repo) {
+  try { return inspectRuntimePin(repo); }
+  catch (err) { fail(err.message); }
+}
+function inspectRuntimePin(repo) {
   const path = pinPath(repo);
   let regular = false;
   try { regular = lstatSync(path).isFile(); } catch (err) {
     if (err.code === 'ENOENT') return undefined;
-    fail(`cannot inspect existing runtime pin: ${path}: ${err.message}`);
+    throw new Error(`cannot inspect existing runtime pin: ${path}: ${err.message}`);
   }
   let pin;
   try { pin = readJson(path); } catch { /* malformed existing pins are refused below */ }
   if (!regular || !pin || typeof pin.dir !== 'string' || !pin.dir.trim() ||
       typeof pin.digest !== 'string' || !pin.digest.trim() || !existsSync(join(pin.dir, '.complete'))) {
-    fail(`existing runtime pin is invalid or unavailable: ${path}. Preserve it and restore the pinned runtime, or explicitly use resume --repin --repo ${repo}. Nothing was re-pinned.`);
+    throw new Error(`existing runtime pin is invalid or unavailable: ${path}. Preserve it and restore the pinned runtime, or explicitly use resume --repin --repo ${repo}. Nothing was re-pinned.`);
   }
   return pin;
 }
@@ -283,6 +289,26 @@ function rlog(repo, msg) {
   } catch {
     /* non-authoritative */
   }
+}
+
+function notifyOperator(repo) {
+  const result = reconcileNotifications({ home: RUNNER_HOME, repo, snapshot: () => {
+    if (runnerAlive(repo) && readFileSync(RLOCK(repo), 'utf8').trim() !== String(process.pid)) return undefined;
+    const runnerState = readState(repo);
+    // Observation must neither mint a runtime pin nor exit the service on a broken one.
+    let status;
+    try {
+      const pin = inspectRuntimePin(repo);
+      if (pin) {
+        const result = sh([process.execPath, join(pin.dir, 'scripts', 'run.mjs'), 'status', '--json', '--repo', repo], { cwd: repo, timeoutMs: 30_000 });
+        if (result.code === 0) status = JSON.parse(result.out);
+      }
+    } catch { /* unavailable observation; preserve pending delivery */ }
+    if (!status && !runnerState.needsYou) return undefined;
+    return { status: status ?? { task: safeReadTask(repo).task }, runnerState };
+  } });
+  if (result.state === 'error' || result.state === 'exhausted') rlog(repo, `notifications: ${result.state}; task state is unaffected`);
+  return result;
 }
 
 function readState(repo) {
@@ -1168,7 +1194,12 @@ function clearRetry(repo, key) {
 // ---------------------------------------------------------------------------
 // the loop
 
-async function runLoop(repo, { once = false } = {}) {
+async function runLoop(repo, options = {}) {
+  try { return await runLoopWork(repo, options); }
+  finally { notifyOperator(realOrResolved(repo)); }
+}
+
+async function runLoopWork(repo, { once = false } = {}) {
   repo = realOrResolved(repo);
   if (!existsSync(join(S(repo), 'task.json'))) fail(`no task in ${repo} — runner.mjs assign first`);
   if (!acquireRunnerLock(repo)) {
@@ -1817,6 +1848,7 @@ async function cmdAssign() {
   const probe = await launchProbe(repo, task, assignRunId);
   if (!probe.ok) {
     needsYou(repo, `the launch probe found the driver boundary is not enforced on this machine — nothing was started:\n- ${probe.problems.join('\n- ')}`);
+    notifyOperator(repo);
     process.exit(1);
   }
   registerRepo(repo);
@@ -1936,6 +1968,7 @@ async function cmdResume() {
   }
   clearNeedsYou(repo);
   if (readTask(repo)?.pr) {
+    notifyOperator(repo);
     console.log(`ben: READY FOR REVIEW (not merged, not deployed) · ${readTask(repo).pr.url}`);
     return;
   }
@@ -2319,9 +2352,12 @@ async function cmdServe() {
         // dropped BEFORE anything task-specific runs
         PINNED = undefined;
         if (!existsSync(join(S(repo), 'task.json'))) continue;
+        if (children.has(repo) || runnerAlive(repo)) continue;
+        // Parked/delivered tasks still need notification retries after process restart.
+        // Observe through this task's pin; never notify from a live worker's intermediate state.
+        notifyOperator(repo);
         const task = readTask(repo);
         if (task?.pr) continue;
-        if (children.has(repo) || runnerAlive(repo)) continue;
         if (children.size >= concurrency) continue;
         const st = readState(repo);
         if (st.needsYou) continue;
@@ -2400,9 +2436,12 @@ if (values['keep-awake'] && values['allow-sleep']) fail('choose --keep-awake or 
 // `resume --repin` is such an operator act too — it
 // must run from the INSTALL (re-executed from the old pin, installRuntimeDir()
 // would resolve to the pin itself and re-pin the old runtime under its own digest)
-if (['run', 'resume', 'status', 'repair', 'readiness'].includes(command) && !isBlank(values.repo) && !(command === 'resume' && values.repin === true)) reexecFromPin(realOrResolved(values.repo));
+if (['run', 'resume', 'status', 'repair', 'readiness', 'notify'].includes(command) && !isBlank(values.repo) && !(command === 'resume' && values.repin === true)) reexecFromPin(realOrResolved(values.repo));
 
 switch (command) {
+  case 'notify':
+    console.log(JSON.stringify(notifyOperator(realOrResolved(values.repo ?? fail('--repo <path> is required')))));
+    break;
   case 'readiness': {
     const repo = realOrResolved(values.repo ?? fail('--repo <path> is required'));
     const status = statusJson(repo);

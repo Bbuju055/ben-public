@@ -2,7 +2,7 @@ import { readGuidance, validateGuidance, withWorkGuidance } from '../scripts/gui
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, realpathSync, readdirSync, rmSync } from 'node:fs';
-import { appendFile, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execArgv, type ExecResult } from '../src/lib/exec';
 import { failureKind, researchFiles, accountTotals, BEN_DIR, judgeProbe, progressIdentity, reachedLimit, effectiveLimits, configurationProblems, renderDriverSettings, renderGateProfile, planDependenciesSection, scrubForOperator, sleepGapMs } from '../scripts/runner.lib.mjs';
@@ -1987,3 +1987,126 @@ test('guidance: reconciliation stretches receive the selected reference', async 
   }
   expect(existsSync(join(S(w.repo), 'approval.json'))).toBe(false);
 }, 240_000);
+
+// Notification integration uses only a local stdin-to-file sink. No live delivery.
+async function notificationSink(w: World, fail = false) {
+  const path = join(w.home, 'notification-sink.mjs');
+  const received = join(w.home, 'notifications-received.jsonl');
+  await writeFile(path, `import {readFileSync,appendFileSync} from 'node:fs';
+const event=JSON.parse(readFileSync(0,'utf8'));
+appendFileSync(${JSON.stringify(received)},JSON.stringify(event)+'\\n');
+process.exit(${fail ? 1 : 0});\n`);
+  await writeFile(join(w.home, 'notifications.json'), JSON.stringify({enabled:true,argv:[process.execPath,path]}));
+  return async () => existsSync(received) ? (await readFile(received,'utf8')).trim().split('\n').map(line=>JSON.parse(line)) : [];
+}
+function notificationOutbox(w: World) {
+  const dirs=readdirSync(join(w.home,'notifications'));
+  expect(dirs).toHaveLength(1);
+  return join(w.home,'notifications',dirs[0]!, 'outbox.json');
+}
+
+test('notifications: approval and completion reach a fake sink once across repeated runs, status reads and service lifetimes', async () => {
+  const w=await world();const received=await notificationSink(w);
+  const assigned=await ben(w,['assign','--repo',w.repo,'--inline','Add subtract']);
+  expect(assigned.exitCode).toBe(0);expect(assigned.stdout).toContain('WAITING ON YOU (approval)');
+  expect((await received()).map(r=>r.kind)).toEqual(['park']);
+  const beforeTask=await readFile(join(S(w.repo),'task.json'),'utf8');
+  const beforeLedger=existsSync(join(S(w.repo),'ledger.jsonl'))?await readFile(join(S(w.repo),'ledger.jsonl'),'utf8'):null;
+  const outbox=await readFile(notificationOutbox(w),'utf8');
+  expect((await ben(w,['status','--repo',w.repo,'--json'])).exitCode).toBe(0);
+  expect(await readFile(notificationOutbox(w),'utf8')).toBe(outbox);
+  expect((await ben(w,['notify','--repo',w.repo])).exitCode).toBe(0);
+  const services=await Promise.all([ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'}),ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})]);
+  expect(services.every(r=>r.exitCode===0)).toBe(true);
+  expect(await readFile(join(S(w.repo),'task.json'),'utf8')).toBe(beforeTask);
+  if(beforeLedger!==null)expect(await readFile(join(S(w.repo),'ledger.jsonl'),'utf8')).toBe(beforeLedger);
+  expect(await received()).toHaveLength(1);
+  const gate=(await readTask(w.repo)).gate.id;
+  const done=await ben(w,['resume','--repo',w.repo,'--gate',gate,'--choose','approve','--inline']);
+  expect(done.exitCode).toBe(0);expect(done.stdout).toContain('READY FOR REVIEW');
+  expect((await received()).map(r=>r.kind)).toEqual(['park','complete']);
+  const task=await readTask(w.repo);
+  expect((await received())[1].reviewedSha).toBe(task.pr.headSha);
+  expect((await received())[1].prUrl).toBe(task.pr.url);
+  expect((await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})).exitCode).toBe(0);
+  expect(await received()).toHaveLength(2);
+  expect(JSON.parse(await readFile(w.store,'utf8')).prs).toHaveLength(1);
+},240_000);
+
+test('notifications: fake sink failure cannot alter a limit park; restart keeps the saved notification retry deadline', async () => {
+  const w=await world({handler:DEFAULT_HANDLER.replace('cost: 0.11','cost: 1')});
+  const received=await notificationSink(w,true);
+  const assigned=await ben(w,['assign','--repo',w.repo,'--inline','--usd','0.5','Add subtract']);
+  expect(assigned.exitCode).toBe(0);expect((await readTask(w.repo)).gate.kind).toBe('limit');
+  expect((await received()).map(r=>r.kind)).toEqual(['limit']);
+  const before=await readFile(join(S(w.repo),'task.json'),'utf8');
+  const box=await readFile(notificationOutbox(w),'utf8');
+  expect(JSON.parse(box).items[0]).toMatchObject({state:'pending',attempts:1});
+  expect((await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})).exitCode).toBe(0);
+  expect(await readFile(notificationOutbox(w),'utf8')).toBe(box);
+  expect(await readFile(join(S(w.repo),'task.json'),'utf8')).toBe(before);
+  expect(await received()).toHaveLength(1);
+},240_000);
+
+test('notifications: authentication stop emits a generic alert without provider output, and service does not restart the actor', async () => {
+  const handler=DEFAULT_HANDLER.replace('export async function handle','async function baseHandle')+`
+export async function handle(instruction,ctx){
+ if(/Write the plan artifacts/.test(instruction))return {isError:true,text:'401 unauthorized PRIVATE_PROVIDER_OUTPUT'};
+ return baseHandle(instruction,ctx);
+}`;
+  const w=await world({handler});const received=await notificationSink(w);
+  const result=await ben(w,['assign','--repo',w.repo,'--inline','Add subtract']);
+  expect(result.exitCode).toBe(1);expect(result.stdout).toContain('authentication needs renewal');
+  expect((await received()).map(r=>r.kind)).toEqual(['stop']);
+  expect(JSON.stringify(await received())).not.toContain('PRIVATE_PROVIDER_OUTPUT');
+  const count=(await driverRows(w)).length;
+  expect((await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})).exitCode).toBe(0);
+  expect((await driverRows(w)).length).toBe(count);expect(await received()).toHaveLength(1);
+},240_000);
+
+test('notifications: first service observation catches an already parked task after opt-in, without launching a model', async () => {
+  const w=await world();
+  expect((await ben(w,['assign','--repo',w.repo,'--inline','Add subtract'])).stdout).toContain('WAITING ON YOU (approval)');
+  expect(existsSync(join(w.home,'notifications'))).toBe(false);
+  const received=await notificationSink(w);
+  const drivers=(await driverRows(w)).length;
+  expect((await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})).exitCode).toBe(0);
+  expect((await received()).map(r=>r.kind)).toEqual(['park']);
+  expect((await driverRows(w)).length).toBe(drivers);
+},240_000);
+
+test('notifications: recorded abandonment emits stop without publication or duplicate operator decisions', async () => {
+  const w=await world();const received=await notificationSink(w);
+  expect((await ben(w,['assign','--repo',w.repo,'--inline','Add subtract'])).exitCode).toBe(0);
+  const gate=(await readTask(w.repo)).gate.id;
+  await ben(w,['resume','--repo',w.repo,'--gate',gate,'--choose','abort','--note','fixture stop','--inline']);
+  const events=await received();
+  expect(events.map(r=>r.kind)).toEqual(['park','stop']);expect(events[1].reason).toBe('abandoned');
+  const before=await readFile(join(S(w.repo),'task.json'),'utf8');
+  expect((await ben(w,['notify','--repo',w.repo])).exitCode).toBe(0);
+  expect(await received()).toHaveLength(2);
+  expect(await readFile(join(S(w.repo),'task.json'),'utf8')).toBe(before);
+  expect((await readTask(w.repo)).pr).toBeUndefined();
+},240_000);
+
+test('notifications: a damaged delivered-task pin cannot terminate service notification observation', async () => {
+  const w=await world();await notificationSink(w);
+  await toApprovedIntent(w);
+  expect((await ben(w,['run','--repo',w.repo])).stdout).toContain('READY FOR REVIEW');
+  const taskBefore=await readFile(join(S(w.repo),'task.json'),'utf8');
+  const keys=readdirSync(join(w.home,'tasks'));
+  expect(keys).toHaveLength(1);
+  const pin=join(w.home,'tasks',keys[0]!, 'runtime.json');
+  const saved=await readFile(pin,'utf8');
+  await writeFile(pin,JSON.stringify({...JSON.parse(saved),dir:join(w.home,'missing-runtime')}));
+  const before=await readFile(pin,'utf8');
+  const result=await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'});
+  expect(result.exitCode).toBe(0);
+  expect(await readFile(pin,'utf8')).toBe(before);
+  expect(await readFile(join(S(w.repo),'task.json'),'utf8')).toBe(taskBefore);
+  await rename(pin,pin+'.preserved');
+  expect((await ben(w,['serve'],{BEN_RUNNER_SERVE_ONCE:'1'})).exitCode).toBe(0);
+  expect(existsSync(pin)).toBe(false);
+  expect(await readFile(pin+'.preserved','utf8')).toBe(before);
+  expect(await readFile(join(S(w.repo),'task.json'),'utf8')).toBe(taskBefore);
+},240_000);

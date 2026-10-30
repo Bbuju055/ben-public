@@ -1536,7 +1536,10 @@ export async function handle(instruction, ctx) {
     writeFileSync(join(S, 'promises.json'), '[]'); writeFileSync(join(S, 'plan-files.json'), '["math.ts"]'); writeFileSync(join(S, 'gates.json'), '{"t":"true"}');
     return { cost: 0.01 };
   }
-  if (/commit/i.test(instruction)) return { hang: true };
+  if (/commit/i.test(instruction)) {
+    writeFileSync(join(ctx.cwd, 'driver-hanging.pid'), String(process.pid));
+    return { hang: true };
+  }
   return { cost: 0.01 };
 }`;
   const w = await world({ handler });
@@ -1549,7 +1552,9 @@ export async function handle(instruction, ctx) {
   let pid: number | null = null;
   for (let i = 0; i < 400; i++) {
     const st = JSON.parse(await readFile(join(S(w.repo), 'runner', 'state.json'), 'utf8').catch(() => '{}'));
-    if (st.currentStretchPid) {
+    const hangingPid = Number(await readFile(join(w.repo, 'driver-hanging.pid'), 'utf8').catch(() => '0'));
+    // Resume may briefly record a preflight driver; wait for the intended worker.
+    if (hangingPid > 0 && st.currentStretchPid === hangingPid) {
       pid = st.currentStretchPid;
       break;
     }
@@ -1590,6 +1595,7 @@ export async function handle(instruction, ctx) {
   }
   for (let i = 0; i < 100 && alive(); i++) await Bun.sleep(50);
   expect(alive()).toBe(false);
+  rmSync(join(w.repo, 'driver-hanging.pid'));
   // 3. quiescent → the replacement happens under the runner lock and the lock is released afterwards
   const r3 = await ben(w, ['resume', '--repo', w.repo, '--repin']);
   expect(r3.stdout).toContain('runtime re-pinned');

@@ -44,6 +44,38 @@ currently available. No service was installed or OS transition test performed.
 The recovery harness uses a fixture-specific adapter and skips the live actor
 isolation probe; it does not validate the production installer or live actors.
 
+## Notifications verification (2026-10-30)
+
+[PR #7](https://github.com/Bbuju055/ben-public/pull/7) is merged. It adds
+operator-configured notifications for park, limit, stop and ready-for-review
+completion. Notifications default off and do not authorize task work. Stable
+event IDs, a durable outbox and bounded retries support restart recovery;
+sinks must deduplicate IDs because exactly-once delivery is not promised.
+
+Fresh local checks passed before publication: typechecking, all 11 notification
+tests (72 assertions), syntax checks and the diff check. All six changed files
+matched the final review receipt, which records 81 passing macOS runner/isolation
+tests. Coverage includes retry deadlines, deduplication, stale-gate reactivation
+without resetting retries, and damaged/missing runtime-pin preservation.
+
+[PR Checks](https://github.com/Bbuju055/ben-public/actions/runs/41077574422)
+passed for head `8f4f0d44274d3cf32f7dd66301a394712d16e7ea`.
+After merging, a separate push-triggered
+[main Checks run](https://github.com/Bbuju055/ben-public/actions/runs/41079036576)
+passed for merge commit `326212eec24a23d34e45fda7dc6600e700bcc09b`.
+All three jobs passed: core/typecheck/offline/CSV/adapter checks, browser evidence,
+and macOS runner/isolation including the offline recovery harness. No fixes or
+reruns were needed. These results apply to the stated commits; later commits
+require their own CI result.
+
+**Deferred, not passed:** live notification providers/deliveries,
+installed-service startup/restart/unload and notification behavior, and
+sleep/wake, logout/login and reboot/login recovery. Notification tests use fake
+local sinks, scripted actors and disposable targets. One-shot service subprocesses
+and the offline recovery harness do not verify an installed service or OS
+transitions. No live deliveries, service installation or OS recovery tests ran.
+The historical live acceptance claims below remain unchanged.
+
 ## Running checks
 
 | Command | Scope |

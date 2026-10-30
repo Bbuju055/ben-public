@@ -1,48 +1,37 @@
 # ben
 
-Claude builds; ben automatically calls Codex to review the plan and code.
-Independent review, human approval, and scripted checks control progress.
+Claude builds. Codex reviews the plan and code. You approve the plan;
+scripted checks and independent review control progress.
 
 ```mermaid
-flowchart TD
-    Plan[Claude writes the plan] -->|ben calls Codex automatically| PlanReview[Codex reviews the plan]
-    PlanReview --> Approval[Human approves the plan]
-    Approval --> Build[Claude implements]
-    Build --> Checks[Scripts run acceptance checks]
-    Checks -->|ben calls Codex automatically| DiffReview[Codex reviews the diff]
-    DiffReview --> PR[PR ready for human review and merge]
+flowchart LR
+    Plan --> Review[Plan review] --> Approval[Human approval]
+    Approval --> Build --> Checks --> Diff[Code review] --> PR[PR ready for review]
 ```
 
-The diagram shows the successful path. Failed checks and review findings require
-repair or a human decision. Plans, approvals, findings, and evidence stay in the
-target repository's `.ben/` directory. Changed plans require renewed approval.
-ben never merges or deploys.
+Failed checks or review findings require repair or a human decision. Changed
+plans require renewed approval. Evidence stays in the target's `.ben/` directory.
+**Ben never merges or deploys.**
 
-## Worked example
+## Quickstart
 
-Claude built a synthetic CSV export that preserves filters and excludes
-internal notes. Codex returned GO on the plan and diff with zero blockers; a human
-approved the plan. All 17 tests passed across six criteria.
+Follow the [quickstart](GETTING_STARTED.md) to install the skill and run a small
+supervised task. Live features require your own authenticated Claude and Codex
+access; usage may incur charges. Publication also requires GitHub access.
 
-Inspect the [original code, tests and review provenance](examples/csv-export/PROVENANCE.md).
-This operator-run example demonstrates the interactive happy path, not autonomous
-runner acceptance or defect repair. Formula protection was out of scope.
-
-## Try it locally
-
-From a checkout of ben, with Git and Node.js 24, run the free example:
+Try the scripted offline demo with Git and Node.js 24:
 
 ```bash
 node examples/offline/run.mjs
 ```
 
-It deliberately fails two implementations, parks for a simulated operator decision,
-then repairs the code. Inspect the printed evidence directory. No model credentials,
-dependencies, browser or remote writes are needed; commits stay in a temporary fixture.
+Expected: two failed implementations, then a passing repair and an evidence path.
+No AI calls, credentials, dependencies or remote writes; commits stay in a
+temporary fixture. The demo cannot build a new feature.
 
 ## Development
 
-Requires Git, Node.js 24, and Bun 1.3.14. The runner and full test suite require macOS.
+Requires Git, Node.js 24 and Bun 1.3.14. The runner and full suite require macOS.
 
 ```bash
 bun install --frozen-lockfile
@@ -51,42 +40,31 @@ bun run typecheck
 bun run test
 ```
 
-Tests use scripted agents; no model credentials are required. See
-[verification](VERIFICATION.md) for environment requirements and results.
+Tests use scripted agents. See [verification](VERIFICATION.md) for environment
+requirements, separate examples and recorded results.
 
-## Use
+| Interface | Status |
+| --- | --- |
+| `SKILL.md`, `references/`, `prompts/`, `schemas/`, `scripts/*.mjs` | Active runtime; Node built-ins only |
+| `src/`, `config/ben.config.ts`, `bun run ben` | Retired, tested legacy code; different approval and review behavior |
 
-Live use requires authenticated Claude and Codex CLIs. GitHub publication
-requires authenticated `gh` and Git push access. Model calls may incur charges.
-
-From the ben checkout, link the skill once (leave an existing `ben` skill untouched):
-
-```bash
-mkdir -p "$HOME/.claude/skills"
-if [ ! -e "$HOME/.claude/skills/ben" ] && [ ! -L "$HOME/.claude/skills/ben" ]; then
-  ln -s "$PWD" "$HOME/.claude/skills/ben"
-fi
-```
-
-Open Claude in a target Git repository and say “build it through ben,” then
-describe the change. The [skill reference](SKILL.md) covers planning, approvals,
-recovery, and the optional macOS runner. Runner assignments include branch push
-and PR creation; use them only when that publication is intended.
-
-The runtime is `SKILL.md`, `references/`, `prompts/`, `schemas/`, and `scripts/*.mjs` (Node built-ins only). `src/`,
-`config/ben.config.ts`, and `bun run ben` are retired, retained as a tested legacy
-implementation. Its approval, manual-criterion and
-review-input behavior differs from the active scripts; use the skill interface
-for current workflows.
-
-## Limits
+## Status
 
 Experimental, single-operator macOS tooling. Bounded live acceptance passed with
-human intervention; beyond-soft-cap continuation remains unexercised and is an
-accepted release gap. See [verification](VERIFICATION.md#live-acceptance-and-release-decision).
-Checks can miss defects; cost estimates are not spending ceilings.
+human intervention. Beyond-soft-cap live continuation remains an accepted,
+unexercised gap. Checks can miss defects; estimates are not spending ceilings.
+See [live verification](VERIFICATION.md#live-acceptance-and-release-decision)
+and [known limitations](FINDINGS.md).
 
-Local check results and their scope are recorded in [verification](VERIFICATION.md).
+The [CSV example](examples/csv-export/PROVENANCE.md) records an interactive happy
+path: 17 tests, six criteria, human approval, and Codex GO on plan and diff.
+It is not autonomous-runner or defect-repair acceptance; formula protection was
+out of scope.
 
-[Design](DESIGN.md) · [Quality bar](NORTH_STAR.md) · [Roadmap](ROADMAP.md) ·
-[Known limitations](FINDINGS.md). MIT licensed.
+## Documentation
+
+[Quickstart](GETTING_STARTED.md) · [Skill](SKILL.md) ·
+[Runner](references/runner.md) · [Recovery](references/recovery.md) ·
+[Design](DESIGN.md) · [Quality bar](NORTH_STAR.md) · [Roadmap](ROADMAP.md)
+
+MIT licensed.

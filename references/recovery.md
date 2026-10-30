@@ -1,73 +1,86 @@
 # Recovery reference
 
-Operator/coordinator reference. Commands here require the corresponding real
-human decision or existing authorization; they are never instructions for a
-headless work stretch. The sequencer determines which operation is legal.
+For operators handling a diagnosed STOP. Commands require the relevant human
+decision or existing authorization; they are not headless work instructions.
+The sequencer determines the legal next operation.
 
-## Recovery playbook — when `next` says STOP
+## Before repairing state
 
-The sequencer diagnoses; the runner can repair specific, proven partial writes.
-Interactive recovery follows the cases below. Hard invariants: never
-rewrite or delete append-only ledger history to look consistent; never fabricate an
-adjudication outcome; complete a missing derivative only when it is unambiguously
-implied by durable authoritative facts; if that bar is not met, the disposition is the
-human's (up to and including ABANDON.md). The known partial states:
+- Preserve evidence. Never rewrite or delete append-only history to make it agree.
+- Never fabricate an adjudication outcome.
+- Reconstruct a missing derivative only when durable authoritative facts imply it
+  unambiguously. Otherwise escalate to the human, including abandonment.
+- Apply only the diagnosed repair below. Return to the controller afterward;
+  a reference link does not authorize the next phase.
 
-- **Stale lock** (`.ben/.run-lock`, holder pid dead): verify the pid is truly gone
-  (`ps -p <pid>`), then delete the lock file. The sequencer never steals it.
+## Locks and incomplete writes
 
-- **Ledger holds `raised` entries for a round, `blockers.json` missing, tally not
-  advanced** (crash inside `ledger.mjs round`): the blocker set is unambiguously
-  implied by the verdict file plus those entries — restore `blockers.json` from the
-  verdict's BLOCKER findings (fingerprints in the ledger lines) and set the round
-  tally to that round in `rounds.json`; or abandon the round to the human.
+### Stale `.ben/.run-lock`
 
-- **Ledger holds resolutions for a round but `blockers.json` still exists** (crash
-  inside `ledger.mjs resolve`): the resolutions landed; delete `blockers.json` after
-  confirming every open fingerprint has its ledger resolution.
+Confirm the holder PID is dead with `ps -p <pid>`, then delete that lock.
+The sequencer never steals it.
 
-- **Grant in `rounds.json` without its ledger audit line** (crash inside
-  `ledger.mjs grant`): the runner uses the saved intent to roll back that grant,
-  restore its review-stop slot and ask the same question again. Interactively,
-  either remove the half-applied grant object from `rounds.json`
-  and re-run `record-grant`, or append the missing audit line by hand — one or the
-  other, never both, and say which was done.
+### Missing `blockers.json` after `ledger.mjs round`
 
-- **Torn trailing line in `veto.jsonl`**: the record before the torn line is intact;
-  remove the torn fragment (it was never a complete record) and re-record the veto.
+If the ledger has the round's `raised` entries but the tally has not advanced,
+restore `blockers.json` from the verdict's BLOCKER findings using the ledger
+fingerprints. Set that round's tally in `rounds.json`. If the evidence is
+ambiguous, leave the round's disposition to the human.
 
-- **`task.json` unreadable**: save a copy of the broken file, remove it, then
-  re-create the sequencer state via `adopt --base <sha> --by <user> --confirm`
-  against the same dir (adopt refuses while a `task.json` exists).
+### Resolved findings still in `blockers.json`
 
-- **Exhausted or abstained review:** grant another round through the recorded
-  operation and let the review finish, or abandon. Disputed findings use the
-  proposal/veto/resolution path. Hand-editing state to bypass a referee is not a
-  supported recovery operation.
+After a crash in `ledger.mjs resolve`, confirm every open fingerprint has a
+ledger resolution before deleting `blockers.json`.
 
-- **Adjudication state/ledger divergence** (a record in `adjudications.json`
-  whose complete record is absent from the ledger, or vice versa — the
-  half-applied dual write): the ledger is the history authority. A register
-  record missing its ledger row is completed by appending the matching audit
-  entry (kind `adjudication`, round 0, fingerprint = record digest, the record
-  embedded) or removed as never-landed; a ledger act missing from the register
-  is restored INTO the register (superset-only — never delete other records).
-  One or the other, never both, and say which was done.
+### Grant without its audit line
 
-- **Conflicting adjudication records** (same binding identity, different
-  content): the tooling refuses to create these; hand-restored state can hold
-  them. The human keeps the record that reflects the actual decision and
-  removes the fabricated one FROM BOTH files only if it provably never was a
-  real act; otherwise ABANDON-level escalation — adjudication history is never
-  silently rewritten.
+After a crash in `ledger.mjs grant`, the runner uses saved intent to roll back
+the grant, restore its review-stop slot and ask again.
 
-- **Pending PR intent with a stale adjudication digest** (an adjudication was
-  recorded after the intent's earned diff GO): not corruption — the pending-intent
-  migration. Run the exact `record-pr-remote` command the gate prints; the
-  task re-earns verification and diff review at the current governing set
-  before anything terminal.
+For interactive repair, either remove the partial grant from `rounds.json` and
+rerun `record-grant`, or append the missing audit line. Never do both; record
+which repair was applied.
 
-Everything in `$S` stays on disk for inspection; clean nothing up.
+### Torn `veto.jsonl` tail
 
-Return to the controller: complete only the current action, then return to the
-sequencer (interactive) or runner (headless). A link does not authorize a next phase.
+Confirm the preceding record is intact. Remove only the incomplete trailing
+fragment and re-record the veto.
+
+### Unreadable `task.json`
+
+Save a copy, remove the broken file, then recreate state in the same directory
+with `adopt --base <sha> --by <user> --confirm`. Adoption refuses an existing
+`task.json`.
+
+## Review and adjudication
+
+### Exhausted or abstained review
+
+Use the recorded operation to grant another round, or abandon. Disputed findings
+use proposal/veto/resolution. Do not hand-edit state to bypass a referee.
+
+### Adjudication register/ledger divergence
+
+The ledger is authoritative. For a partial dual write:
+
+- **Register record without a ledger row:** append the matching audit entry
+  (`kind: adjudication`, round 0, fingerprint = record digest, embedded record),
+  or remove the register record as never-landed. Never do both; record the choice.
+- **Ledger act without a register record:** restore it into `adjudications.json`.
+  Preserve all other register records.
+
+### Conflicting adjudication records
+
+For the same binding identity with different content, the human selects the
+record reflecting the actual decision. Remove the fabricated record from both
+files only if it provably never represented a real act. Otherwise escalate to
+ABANDON-level handling; never silently rewrite adjudication history.
+
+## Stale adjudication digest in a pending PR intent
+
+An adjudication recorded after diff GO triggers migration, not corruption.
+Run the exact `record-pr-remote` command printed by the gate. The task must
+re-earn verification and diff review under the current governing set before
+reaching a terminal state.
+
+Preserve the remaining state and evidence for inspection; do no general cleanup.

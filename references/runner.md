@@ -1,43 +1,50 @@
 # Runner reference
 
-Operator/coordinator reference. Commands here require the corresponding real
-human decision or existing authorization; they are never instructions for a
-headless work stretch. The sequencer determines which operation is legal.
+For operators. Commands require the relevant human decision or existing
+authorization; they are not headless work instructions. The sequencer controls
+which operation is legal.
 
-## The runner — ben owns an assignment to READY FOR REVIEW
+## Setup and authorization
 
-`scripts/runner.mjs` (alias `ben`) is the unattended operator surface. The runner never
-makes human decisions. It submits explicit operator answers to the sequencer for
-validation and recording. For automatic continuation, it runs `run.mjs next --json`,
-reads the sequencer-owned result (`.ben/last-next.json`: `instruction | reenter |
-park | publish | terminal | stop | contention | usage-error`), and does exactly
-one mechanical thing per outcome — launch a bounded driver stretch, publish from
-a runner-owned mirror, record an observation act (`--by ben-runner`), or stop.
-It owns GitHub publication (scoped `ben/*` push + PR create/edit; no merge or
-deploy). Model CLIs also contact their providers. See [design](../DESIGN.md).
-The runner is built and locally tested on macOS with `/usr/bin/sandbox-exec`.
-Full live acceptance remains open; see [roadmap](../ROADMAP.md).
-`assign` authorizes the publication workflow and launches paid-capable model calls;
-use it only with publication and spending authorization. Define the alias first:
+Start with the [quickstart](../GETTING_STARTED.md). The runner requires macOS,
+`/usr/bin/sandbox-exec`, compatible authenticated `claude`/`codex`/`gh` CLIs, and
+a target with a clean Git tree, an initial commit, GitHub `origin`, Git identity
+and installed project dependencies. The default base branch is `main`.
+
+**`assign` authorizes branch push and PR creation and launches paid-capable model
+calls, including preflight and isolation probes.** It is not a free setup check.
+Ben never merges, deploys or makes human decisions.
+
+Define the alias from the ben checkout:
 
 ```bash
 export BEN="$(pwd)"  # run from the ben checkout
 alias ben='node "$BEN/scripts/runner.mjs"'
 ```
 
-The target needs a clean Git working tree, an initial commit, a GitHub `origin`,
-a configured Git identity, authenticated `claude`/`codex`/`gh`, and installed
-project dependencies. The runner's default base branch is `main`.
+## Commands
 
-```
-ben assign  --repo <path> "<outcome>"            # branch ben/<slug> from origin/<base>, .ben ignored, init, brief, probe, run
-ben status  --repo <path> [--detail|--json] [--refresh-ci]
-ben ci-observe --repo <path>                     # one due opt-in CI observation
-ben resume  --repo <path> --gate <id> --choose <token> [--reply "<text>" | --reply-file f] [--note] [--usd N|--hours N|--stretches N] [--criterion C] [--residual "<gap>"]
-ben follow-up --repo <path> --pr N "<note>"        # new task on the same branch; previous task kept under .ben/history/<n>-<slug>/; the SAME PR is updated
-ben service install|uninstall|status              # LaunchAgent (logged-in sessions only): re-resumes a non-parked task after a runner crash, and after login following logout/reboot
-ben repair  --repo <path>                          # names the playbook step for an engineering session (recovery cases)
-```
+Replace `<path>` and other placeholders with actual values. Quote paths and text.
+
+| Command | Purpose |
+| --- | --- |
+| `ben assign --repo <path> "<outcome>"` | Create `ben/<slug>` from `origin/<base>`, ignore `.ben/`, initialize, probe and run |
+| `ben status --repo <path> --detail` | Inspect cached local state |
+| `ben status --repo <path> --json` | Inspect state as JSON |
+| `ben status --repo <path> --refresh-ci` | Fetch CI evidence for the reviewed SHA |
+| `ben readiness --repo <path>` | Inspect local service, task, gate, probe and budget state |
+| `ben ci-observe --repo <path>` | Perform one due opt-in CI observation |
+| `ben resume --repo <path> --gate <id> --choose <token>` | Submit the gate's exact answer; may resume paid work |
+| `ben follow-up --repo <path> --pr N "<note>"` | Start a new task on the same branch and PR; archive the prior task under `.ben/history/` |
+| `ben repair --repo <path>` | Identify the engineering recovery step |
+| `ben service status` | Inspect the optional logged-in-session LaunchAgent |
+
+Use the exact resume command from `.ben/WAITING.md`, including its reply, note,
+criterion, residual or budget flags. Service installation/uninstallation is
+explicit (`ben service install` / `ben service uninstall`); installed-service and
+OS recovery tests remain deferred.
+
+## CI evidence
 
 `status --refresh-ci` reads GitHub check runs and latest commit statuses for the
 recorded PR's reviewed SHA, checking the PR head before and after collection.
@@ -61,56 +68,76 @@ is no active worker. It never starts an actor, changes task approvals or budgets
 publishes, merges, reruns checks or sends notifications. Existing runtime pins
 are not automatically upgraded.
 
-Each repository/PR/reviewed-SHA identity gets at most 20 attempts, at least one
-minute apart, within 30 minutes of its first attempt. Each collection shares a
-15-second monotonic request timeout budget across all pages and both head checks. Failed
-and interrupted attempts count. Passing, failed or cancelled observations stop
-automatic polling; later reruns require explicit `status --refresh-ci`.
-Pending/unknown observations retry within the same bounds. Disabling and
-re-enabling the observer, or returning to an earlier reviewed SHA, does not reset
-its attempt count or deadlines.
+| Bound | Policy |
+| --- | --- |
+| Identity | Repository / PR / reviewed SHA |
+| Attempts | Maximum 20, at least one minute apart, within 30 minutes of the first attempt |
+| Collection timeout | Shared 15-second monotonic budget across all pages and both head checks |
+| Terminal result | Passed, failed or cancelled stops polling; later reruns need `status --refresh-ci` |
+| Pending/unknown | Retry within the same bounds |
+| Reset | Disabling/re-enabling or returning to an old SHA never resets attempts or deadlines |
 
-Reservations and dated observations are atomically stored under the runner home's
-`ci-observer/`, outside task authority. A reservation records unknown evidence
-before any request, so an interrupted collection cannot leave a new green result.
-Concurrent observers are excluded by a lock; dead owners can be reclaimed, while
-ambiguous locks or corrupt state require operator inspection and are preserved.
-Ordinary status reads the newer manual or scheduled snapshot without network
-requests. Corrupt scheduled evidence forces unknown regardless of cached timestamps. Local/task changes during collection invalidate the result; cached
-observations still cannot detect later remote edits. Exhaustion does not change
-task state and does not imply passing CI.
+Failed/interrupted attempts count. Reservations and observations live atomically
+under the runner home's `ci-observer/`, outside task authority. Each request is
+reserved as unknown before collection. Dead-owner locks can be reclaimed;
+ambiguous locks and corrupt state are preserved for operator inspection.
 
-Coverage uses fake GitHub responses, injected clocks, disposable runner homes
-and direct CLI invocations. Live API polling, service-loop/installed-service
-behavior and OS recovery remain unverified and deferred.
+Status reads the newer manual/scheduled snapshot offline. Corrupt scheduled
+state forces unknown regardless of timestamps. Local/task changes during
+collection invalidate evidence; cached results cannot detect later remote edits.
+Exhaustion changes neither task state nor CI to passing.
 
-CI is informational: `passed` means all observed checks and status contexts
-succeeded, not that required checks or branch protection are satisfied. The
-versioned policy keeps the newest run ID per app/suite/name and keeps distinct
-suites separate. States are pending/passed/failed/cancelled/unknown; skipped,
-neutral, missing, unreadable or incomplete evidence is unknown. Reads stop at
-20 pages per API; failures never reuse an older green observation. This does
-not change delivery gates, PR bodies or merge behavior.
+### Result interpretation
 
-Follow-up reads at most 50 pages of 50 review threads and the first 50 comments
-per thread. The runner updates the existing PR; the [interactive publication instructions](publication.md) describe a different publication path.
+CI is informational. `passed` means all observed checks/statuses succeeded, not
+that branch protection or required checks are satisfied. The policy selects the
+newest run ID per app/suite/name and preserves distinct suites.
 
-Every parked question carries a **gate id** minted by the sequencer
-(`task.gate`); `.ben/WAITING.md` prints the exact `ben resume … --gate <id>
---choose <token>` lines. A noninteractive answer without `--gate` is refused; a
-superseded id is refused with zero writes and the current question shown.
-Tokens: approval `approve | revise --reply | abort`; veto `accept | veto-N |
-abort`; review-stop `continue [--rounds N] | abort`; fix-cap `continue | abort`
-(gates/criteria/scope, the commits check and the plan-round budget; a commits
-grant permits one extra attempt without resetting the referee tally; the honesty
-threshold remains a referee constant — abort or an engineering session);
-manual-adjudication `satisfied --reply | accepted --reply --residual | abort`
-(`--criterion` when several are pending); clarify `reply --reply`;
-supervisor-stop `continue [--note] | abort`; limit `continue --usd N|--hours
-N|--stretches N | abort`; pr-retry / pr-head-mismatch `retry | abort`;
-pr-branch-conflict `reinspect` (an observation, never a decision) `| abort`.
+States: pending, passed, failed, cancelled, unknown. Skipped, neutral, missing,
+unreadable or incomplete evidence is unknown. Each API is limited to 20 pages;
+failures never reuse old green evidence. Delivery gates, PR bodies and merge
+behavior are unchanged.
 
-**The driver boundary.** A stretch is `claude -p --setting-sources ""
+Coverage uses fake responses, clocks, disposable homes and direct CLI calls.
+Live scheduler polling, scheduler-specific service integration, installed-service
+behavior and OS recovery remain deferred; see [verification](../VERIFICATION.md).
+
+Follow-up reads at most 50 pages of 50 review threads and the first 50 comments per thread.
+It updates the existing PR; [interactive publication](publication.md) is a
+separate path.
+
+## Human gates
+
+Use the exact command in `.ben/WAITING.md`. Gates carry a sequencer-minted
+`task.gate` ID. Noninteractive answers require `--gate`; superseded IDs are
+rejected without writes and the current question is shown.
+
+| Gate | Choices |
+| --- | --- |
+| Approval | `approve`, `revise --reply`, `abort` |
+| Veto | `accept`, `veto-N`, `abort` |
+| Review stop | `continue [--rounds N]`, `abort` |
+| Fix cap | `continue`, `abort` |
+| Manual adjudication | `satisfied --reply`, `accepted --reply --residual`, `abort`; add `--criterion` when several are pending |
+| Clarify | `reply --reply` |
+| Supervisor stop | `continue [--note]`, `abort` |
+| Limit | `continue` with `--usd N`, `--hours N` or `--stretches N`; or `abort` |
+| PR retry / head mismatch | `retry`, `abort` |
+| PR branch conflict | `reinspect` (observation only), `abort` |
+
+Fix caps cover gates/criteria/scope, commit checks and plan-round budgets.
+A commit grant allows one extra attempt without resetting the referee tally.
+The honesty threshold remains a referee constant: abort or request engineering
+recovery rather than increasing it.
+
+## Isolation and runtime pins
+
+The runner calls `run.mjs next --json` and follows `.ben/last-next.json`:
+`instruction | reenter | park | publish | terminal | stop | contention | usage-error`.
+It launches a bounded driver, publishes from its mirror, records supervisor
+observations as `ben-runner`, or stops. See [design](../DESIGN.md).
+
+A stretch is `claude -p --setting-sources ""
 --strict-mcp-config --tools Read,Edit,Write,Grep,Glob,Bash --permission-mode
 acceptEdits --settings <runner-written file>` in a filtered environment. The
 runner generates settings that disable repository/user settings and restrict
@@ -141,53 +168,68 @@ Gate and criterion commands run under a per-command `sandbox-exec` profile throu
 own `BEN_SCRATCH_DIR` (`.ben/evidence/scratch/<label>/`), whose regular files the
 referee alone promotes into `.ben/evidence/artifacts/<label>/`.
 
-**Headless driver protocol** (appended to the driver's system prompt): perform
-exactly the one instruction; never run `next`/`record-*`/`answer`; never push or
-call `gh`; write only the named artifacts; ask the human nothing — write
-`.ben/questions.json` (`[{id, question}]`) in the plan stretch for a consequential
-ambiguity and the runner parks it; request an `install` or `research` stretch by
-writing `.ben/stretch-request.json` (`{"mode":"install","packages":[…]}` — only
-after approval and only for packages the approved `plan.md` lists under `##
-Dependencies`; `{"mode":"research","reason":…}` — only with domains granted at
-assign); end the turn with a short report. The current instruction always wins
-over resumed context.
+### Headless driver protocol
 
-**Process lifetime.** `assign`/`resume` detach the runner from the terminal;
-logs live under `.ben/runner/`. After a crash, durable state supports a plain
-`resume`. The optional LaunchAgent resumes non-parked tasks after login; nothing
-runs while logged out. Service recovery was observed for a killed runner while
-logged in, not a physical reboot. Without the service, resume manually. Human
-parks always require an answer. The service checks every 20 seconds and supervises
-up to two tasks concurrently; queued tasks wait for a slot. Tasks waiting for a
-network or provider retry release their service slot until the saved retry time.
+The driver must:
 
-Before leaving a task unattended, run `ben readiness --repo <path>` to inspect
-local service, task, gate, probe and budget state. This does not contact providers
-or prove current authentication. Approve the exact plan and resolve pending human
-criteria before leaving. `assign`, `resume` and `follow-up` accept `--keep-awake`
-to inhibit idle sleep while the runner is active; `--allow-sleep` clears that
-choice. This does not prevent logout, shutdown, forced sleep or laptop lid sleep.
-Without the service a crashed runner needs manual resume. Notifications and
-automatic assignment of new tasks are not implemented.
+- Perform only the current instruction and write only its named artifacts.
+- Never call `next`, `record-*`, `answer`, `gh`, or push.
+- Do not ask the human directly. Write planning ambiguities to
+  `.ben/questions.json` (`[{id, question}]`); the runner parks for the human.
+- Request installs through `.ben/stretch-request.json` with
+  `{"mode":"install","packages":[…]}`, only after approval and only for packages
+  listed under `## Dependencies` in the approved plan.
+- Request research through `.ben/stretch-request.json` with
+  `{"mode":"research","reason":…}`, only for domains granted at assignment.
+- End with a short report. The current instruction overrides resumed context.
 
-The optional interactive Stop hook is retained. Headless stretches use isolated
-settings without that hook: the runner returns to the sequencer after each
-stretch and owns continuation. Transient read-only inspections and live lock
-contention can retry; publication retry gates, approval, isolation failures and
-ambiguous authoritative state remain protected.
+## Process lifetime and recovery
 
-**Limits (accounted, not a hard cap):** $25 / 8 active hours / 40 stretches by
-default; every model launch is reserved in `.ben/runner/stretches.jsonl` before
-it spawns; a launch without a completion is charged at its cap; reviewer calls
-are counted at a process boundary and estimated at $0.50 each. Three unchanged
-stretches trigger two bounded recovery attempts with fresh context. If neither
-makes progress, ben parks a supervisor stop; a human continue permits one more
-attempt. Infrastructure failures have a separate maximum of six automatic retries
-with persisted backoff (up to 15 minutes per delay); their launches still count
-against the same budgets. Authentication failures require renewal. Reaching a per-stretch turn or dollar
-cap ends that stretch; the sequencer re-derives the next step under the unchanged
-task budget. Interactive use stays
-supported: `run.mjs next` refuses while a runner is alive (`.ben/runner.lock`).
+`assign`/`resume` detach by default; logs live in `.ben/runner/`. Closing the
+terminal does not stop work. There is no general `ben stop` command. At a human
+gate, leave the task parked or use its offered abort choice.
+
+Without the optional service, a crashed runner needs manual resume. For an
+engineering STOP, preserve evidence and consult [recovery](recovery.md).
+Resume can start paid work.
+
+| Service behavior | Boundary |
+| --- | --- |
+| Check every 20 seconds; supervise up to two tasks | Other tasks queue; network/provider retry waits release their slot |
+| Resume non-parked tasks after login | Nothing runs while logged out; human gates always require an answer |
+| `--keep-awake` on assign/resume/follow-up | Inhibits idle sleep only; `--allow-sleep` clears it |
+| Logout, shutdown, forced sleep, lid sleep | Not prevented by idle-sleep inhibition |
+
+`readiness` inspects local service/task/gate/probe/budget state. It does not contact
+providers or prove current authentication or a current probe binding. Inspection
+may populate `~/.ben-runner/runtime/`; the cache must be writable. Approve the
+exact plan and resolve human criteria before leaving work unattended.
+
+Offline fixtures cover simulated failures, not installed-service or OS lifecycle
+recovery. Those tests remain deferred. [Notifications](#optional-notifications)
+are implemented and default off; automatic assignment of new tasks is not.
+
+Headless stretches use isolated settings without the optional interactive Stop
+hook. The runner returns to the sequencer after each stretch. Transient read-only
+inspections and live lock contention can retry; publication retries, approval,
+isolation failures and ambiguous authoritative state remain protected.
+
+## Budgets and retries
+
+Defaults: **$25 / 8 active hours / 40 stretches**. Accounting limits are not
+guaranteed billing ceilings.
+
+| Accounting/recovery | Rule |
+| --- | --- |
+| Model launches | Reserve in `.ben/runner/stretches.jsonl` before spawning; missing completion is charged at its cap |
+| Reviewer calls | Count at the process boundary; estimate $0.50 each |
+| Three unchanged stretches | Two bounded fresh-context recovery attempts, then park; human continue grants one more attempt |
+| Infrastructure failures | At most six automatic retries with persisted backoff, up to 15 minutes per delay; launches count against task budgets |
+| Authentication failure | Requires renewal |
+| Per-stretch turn/dollar cap | End the stretch; re-derive the next step under unchanged task budgets |
+
+Interactive `run.mjs next` refuses while the runner owns `.ben/runner.lock`.
+
 ## Hard enforcement (Claude, optional)
 
 `scripts/stop-hook.mjs` structurally blocks ending the turn while `$S` has open

@@ -107,8 +107,9 @@ rules for the stretch between human gates:
   `run.mjs next` or a fresh ben session continues from durable state exactly
   once: answered gates are not re-presented, completed work is not redone.
 
-This is pull-based operation. Notifications and remote answers are future work
-([roadmap](../ROADMAP.md)); no remote control surface is implemented.
+Answers remain pull-based. Optional [runner notifications](runner.md#optional-notifications)
+can alert the operator; remote answers remain future work
+([roadmap](../ROADMAP.md)). No remote control surface is implemented.
 
 - **Declared gaps only.** Deferring work is fine when the human hears it by name;
   a silent gap is a defect.

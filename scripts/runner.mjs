@@ -17,6 +17,7 @@
 //                       [--usd N|--hours N|--stretches N] [--criterion <id>] [--residual <t>] [--inline]
 //   runner.mjs status   --repo <path> [--detail] [--json] [--refresh-ci]
 //   runner.mjs notify   --repo <path>                  (observe/retry optional notifications)
+//   runner.mjs ci-observe --repo <path>                (one due optional CI observation)
 //   runner.mjs readiness --repo <path>                 (read-only local readiness)
 //   assign/resume/follow-up accept --keep-awake or --allow-sleep (explicit idle-sleep policy)
 //   runner.mjs follow-up --repo <path> --pr N "<note>" [--reopen|--abandon]
@@ -94,6 +95,7 @@ import {
 import { assignmentIssues, prTitleFor } from './adjudication.lib.mjs';
 import { ciTarget, collectCi, ciForStatus } from './ci.lib.mjs';
 import { reconcileNotifications } from './notifications.mjs';
+import { observeCi, scheduledCi } from './ci-observer.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const RUNNER_HOME = realOrResolved(process.env.BEN_RUNNER_HOME ?? join(homedir(), '.ben-runner'));
@@ -309,6 +311,35 @@ function notifyOperator(repo) {
   } });
   if (result.state === 'error' || result.state === 'exhausted') rlog(repo, `notifications: ${result.state}; task state is unaffected`);
   return result;
+}
+
+function observeTargetCi(repo) {
+  return observeCi({ home: RUNNER_HOME, repo, snapshot: () => {
+    if (runnerAlive(repo)) return undefined;
+    const task = safeReadTask(repo);
+    if (task.broken) return undefined;
+    const head = git(repo, ['rev-parse', 'HEAD']);
+    if (head.code !== 0) return undefined;
+    return { task: task.task, localHead: head.out };
+  }, get: (path, { timeoutMs }) => {
+    // File-backed stdout avoids a helper's descendants keeping a pipe open after
+    // timeout. The whole process group is cleaned up on both success and failure.
+    const output = join(nowhereDir(), `ci-${randomUUID()}.json`);
+    const fd = openSync(output, 'wx', 0o600);
+    let result;
+    try {
+      result = spawnSync(GH_CLI, ['api', '--method', 'GET', path], {
+        cwd: nowhereDir(), env: process.env, stdio: ['ignore', fd, 'ignore'],
+        detached: true, timeout: timeoutMs, killSignal: 'SIGKILL',
+      });
+      if (result.error || result.status !== 0 || statSync(output).size > 8 * 1024 * 1024) throw new Error('CI request failed');
+      return JSON.parse(readFileSync(output, 'utf8'));
+    } finally {
+      try {
+        if (result?.pid) try { process.kill(-result.pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
+      } finally { closeSync(fd); unlinkSync(output); }
+    }
+  } });
 }
 
 function readState(repo) {
@@ -2023,6 +2054,8 @@ function cmdStatus() {
     appendFileSync(ciPath, '\n');
     appendDurable(ciPath, ciObservation);
   }
+  const scheduled = scheduledCi(RUNNER_HOME, repo, target);
+  if (scheduled && (scheduled.invalid || !ciObservation || Date.parse(scheduled.observedAt) >= Date.parse(ciObservation.observedAt))) ciObservation = scheduled;
   const ci = ciForStatus(ciObservation, target, git(repo, ['rev-parse', 'HEAD']).out);
   const status = statusJson(repo);
   const alive = runnerAlive(repo);
@@ -2357,7 +2390,10 @@ async function cmdServe() {
         // Observe through this task's pin; never notify from a live worker's intermediate state.
         notifyOperator(repo);
         const task = readTask(repo);
-        if (task?.pr) continue;
+        if (task?.pr) {
+          observeTargetCi(repo);
+          continue;
+        }
         if (children.size >= concurrency) continue;
         const st = readState(repo);
         if (st.needsYou) continue;
@@ -2439,6 +2475,9 @@ if (values['keep-awake'] && values['allow-sleep']) fail('choose --keep-awake or 
 if (['run', 'resume', 'status', 'repair', 'readiness', 'notify'].includes(command) && !isBlank(values.repo) && !(command === 'resume' && values.repin === true)) reexecFromPin(realOrResolved(values.repo));
 
 switch (command) {
+  case 'ci-observe':
+    console.log(JSON.stringify(observeTargetCi(realOrResolved(values.repo ?? fail('--repo <path> is required')))));
+    break;
   case 'notify':
     console.log(JSON.stringify(notifyOperator(realOrResolved(values.repo ?? fail('--repo <path> is required')))));
     break;

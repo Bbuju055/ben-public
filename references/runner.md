@@ -32,6 +32,7 @@ project dependencies. The runner's default base branch is `main`.
 ```
 ben assign  --repo <path> "<outcome>"            # branch ben/<slug> from origin/<base>, .ben ignored, init, brief, probe, run
 ben status  --repo <path> [--detail|--json] [--refresh-ci]
+ben ci-observe --repo <path>                     # one due opt-in CI observation
 ben resume  --repo <path> --gate <id> --choose <token> [--reply "<text>" | --reply-file f] [--note] [--usd N|--hours N|--stretches N] [--criterion C] [--residual "<gap>"]
 ben follow-up --repo <path> --pr N "<note>"        # new task on the same branch; previous task kept under .ben/history/<n>-<slug>/; the SAME PR is updated
 ben service install|uninstall|status              # LaunchAgent (logged-in sessions only): re-resumes a non-parked task after a runner crash, and after login following logout/reboot
@@ -44,6 +45,44 @@ It appends a dated observation to `.ben/runner/ci-observations.jsonl`; ordinary
 status reads that cache offline (`--detail` includes check links, `--json` the
 full observation). A changed reviewed/local/observed PR head invalidates the
 snapshot. A cached result cannot detect later remote changes; refresh to check.
+
+### Optional bounded CI observation
+
+Automatic CI observation defaults off. Enable it only in the operator-owned
+runner home (`~/.ben-runner/ci-observer.json`, or `BEN_RUNNER_HOME`):
+
+```json
+{"enabled":true}
+```
+
+`ci-observe --repo <path>` performs at most one due observation of the recorded
+PR's reviewed SHA. The supervisor also calls it for completed tasks when there
+is no active worker. It never starts an actor, changes task approvals or budgets,
+publishes, merges, reruns checks or sends notifications. Existing runtime pins
+are not automatically upgraded.
+
+Each repository/PR/reviewed-SHA identity gets at most 20 attempts, at least one
+minute apart, within 30 minutes of its first attempt. Each collection shares a
+15-second monotonic request timeout budget across all pages and both head checks. Failed
+and interrupted attempts count. Passing, failed or cancelled observations stop
+automatic polling; later reruns require explicit `status --refresh-ci`.
+Pending/unknown observations retry within the same bounds. Disabling and
+re-enabling the observer, or returning to an earlier reviewed SHA, does not reset
+its attempt count or deadlines.
+
+Reservations and dated observations are atomically stored under the runner home's
+`ci-observer/`, outside task authority. A reservation records unknown evidence
+before any request, so an interrupted collection cannot leave a new green result.
+Concurrent observers are excluded by a lock; dead owners can be reclaimed, while
+ambiguous locks or corrupt state require operator inspection and are preserved.
+Ordinary status reads the newer manual or scheduled snapshot without network
+requests. Corrupt scheduled evidence forces unknown regardless of cached timestamps. Local/task changes during collection invalidate the result; cached
+observations still cannot detect later remote edits. Exhaustion does not change
+task state and does not imply passing CI.
+
+Coverage uses fake GitHub responses, injected clocks, disposable runner homes
+and direct CLI invocations. Live API polling, service-loop/installed-service
+behavior and OS recovery remain unverified and deferred.
 
 CI is informational: `passed` means all observed checks and status contexts
 succeeded, not that required checks or branch protection are satisfied. The

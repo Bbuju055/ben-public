@@ -76,6 +76,47 @@ and the offline recovery harness do not verify an installed service or OS
 transitions. No live deliveries, service installation or OS recovery tests ran.
 The historical live acceptance claims below remain unchanged.
 
+## CI observer verification (2026-10-30)
+
+[PR #9](https://github.com/Bbuju055/ben-public/pull/9) is merged. The opt-in
+scheduler observes the recorded PR's reviewed SHA at most 20 times, at least
+one minute apart, within a 30-minute window. Each collection shares a 15-second
+monotonic request budget. Durable reservations preserve attempts and deadlines
+across restarts. Terminal results stop polling; later reruns require an explicit
+manual refresh. CI remains informational and cannot authorize actors, approvals,
+budget changes, publication, check reruns, merging or notifications.
+
+Final local verification passed 38 focused tests (391 assertions), typechecking,
+syntax checks and the diff check. Offline coverage uses injected clocks, fake
+GitHub GET responses, disposable repositories and runner homes, and direct CLI
+invocations. It covers bounded retries, concurrent observers, stale heads,
+process timeout/cleanup and unchanged task authority. Review regressions prevent
+wall-clock rollback from extending the request budget and future-dated cached
+success from hiding corrupt scheduled evidence. The earlier 461-test core run
+predates those review fixes; it is not final-head verification.
+
+The [initial PR run](https://github.com/Bbuju055/ben-public/actions/runs/41106953501)
+exposed a race in the existing repin fixture, which could mistake a transient
+preflight PID for the intended hanging worker. The fixture now waits for the
+worker's PID marker to match durable state; three consecutive local runs passed.
+[Final PR Checks](https://github.com/Bbuju055/ben-public/actions/runs/41108049419)
+passed for head `b1c01fe4b519dd2afbd5923ba487c1c38d6e7ba0`.
+A separate push-triggered
+[main Checks run](https://github.com/Bbuju055/ben-public/actions/runs/41110213049)
+passed for merge commit `3b27b6b42d78bb973c0c6499237fbbb55bea6d3d`.
+All three jobs passed: core/typecheck/offline/CSV/adapter checks, browser evidence,
+and macOS runner/isolation including the offline service recovery harness.
+No post-merge fixes or reruns were needed. These results apply to the stated
+commits; later commits require their own CI result.
+
+**Deferred, not passed:** live scheduler polling, scheduler-specific service
+integration, live deliveries, installed-service tests, and sleep/wake,
+logout/login and reboot/login recovery. Hosted CI retained existing scripted
+one-shot service fixtures and the disposable offline recovery harness; these do
+not establish scheduler-specific service integration or installed-service/OS
+behavior. No live deliveries, service installation or OS recovery tests ran.
+Historical live acceptance claims remain unchanged.
+
 ## Running checks
 
 | Command | Scope |

@@ -15,6 +15,9 @@ reliability. See [verification](VERIFICATION.md) for local and hosted check resu
   and local unattended-readiness reporting.
 - Informational target-PR CI status tied to the exact reviewed SHA, refreshed
   explicitly with `status --refresh-ci`; no required-CI gate or automatic merge.
+- Opt-in bounded CI-observation scheduler (PR #9), with durable attempt limits,
+  polling deadlines and a shared monotonic request timeout. CI observations
+  remain informational and cannot authorize task work or publication.
 - Offline convergence and recovery coverage, plus a disposable service-adapter
   harness with scripted actors and hosted CI (PRs #2–#5).
 - Opt-in runner notifications on park, stop, limit and ready-for-review
@@ -34,6 +37,11 @@ fake local sinks and disposable targets. See
 [notification verification](VERIFICATION.md#notifications-verification-2026-10-30)
 for the passing post-merge CI result and its scope.
 
+Live scheduler polling and scheduler-specific service integration remain
+**unverified and deferred**. Existing offline service fixtures do not establish
+that integration. See [scheduler verification](VERIFICATION.md#ci-observer-verification-2026-10-30)
+for offline coverage and passing post-merge CI.
+
 ## Live verification
 
 - Blocker reconciliation (A): passed in two separate synthetic assignments.
@@ -49,7 +57,7 @@ See [verification](VERIFICATION.md#live-acceptance-and-release-decision) for sco
 - Richer intake and roadmap assignment.
 - Full spend ledger and referee recovery tooling.
 - Remote answer, status, abort and note controls.
-- Automatic PR follow-through and target-CI evidence collection.
+- Broader automatic PR follow-through beyond bounded informational CI observation.
 - Additional reviewers and multi-reviewer policies.
 - Execution environments beyond macOS.
 

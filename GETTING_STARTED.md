@@ -48,6 +48,17 @@ Existing runner tasks retain their pinned runtime.
 
 </details>
 
+Check local prerequisites without model calls:
+
+```bash
+node scripts/doctor.mjs
+```
+
+Add `--repo /path/to/project` for local Git checks, `--online` for read-only
+GitHub API checks, or `--json` for structured results. Exit 0 means the selected
+prerequisites passed, not that live operation is proven. See
+[checker scope and exit codes](references/doctor.md).
+
 ## Offline demo — no AI calls
 
 From the checkout:

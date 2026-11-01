@@ -11,6 +11,10 @@ Start with the [quickstart](../GETTING_STARTED.md). The runner requires macOS,
 a target with a clean Git tree, an initial commit, GitHub `origin`, Git identity
 and installed project dependencies. The default base branch is `main`.
 
+For a free, bounded prerequisite inspection, run
+`node scripts/doctor.mjs --repo <path>` from the ben checkout. See
+[doctor scope and limitations](doctor.md); it does not replace startup preflight.
+
 **`assign` authorizes branch push and PR creation and launches paid-capable model
 calls, including preflight and isolation probes.** It is not a free setup check.
 Ben never merges, deploys or makes human decisions.
